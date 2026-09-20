@@ -1,0 +1,12 @@
+services:
+  - name: abpf-frontend
+    type: staticSite
+    runtime: node
+    repo: https://github.com/Hemil0106/abpf-frontend
+    branch: main
+    buildCommand: npm ci && npm run build
+    publishPath: dist
+    autoDeploy: true
+    envVars:
+      - key: VITE_API_URL
+        value: https://abpf-backend.onrender.com

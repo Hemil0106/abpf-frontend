@@ -1,0 +1,177 @@
+export interface StationDto {
+  stationName: string;
+  km: number;
+}
+
+export interface SectionDto {
+  divisionId: string;
+  divisionName: string;
+  zone: string;
+  zoneName: string;
+  sectionName: string;
+  displayLabel: string;
+  startKm: number;
+  endKm: number;
+  stations: StationDto[];
+}
+
+export interface ZoneGroup {
+  code: string;
+  name: string;
+  divisions: SectionDto[];
+}
+
+export interface TrainDto {
+  trainId: string;
+  trainName: string;
+  priority: number;
+  arrivalTime: string;
+  departureTime: string;
+  originStation: string;
+  destinationStation: string;
+  loopLineRequirement: boolean;
+}
+
+export interface AssetDto {
+  assetId: string;
+  assetType: string;
+  locationKm: number;
+  failureProbability: number;
+  consequenceScore: number;
+  rulDays: number;
+  failureRiskScore: number;
+}
+
+export interface BlockDto {
+  blockId: string;
+  sectionId: string;
+  startKm: number;
+  endKm: number;
+  startTime: string;
+  endTime: string;
+  requiredDurationMinutes: number;
+  blockPriority: number;
+}
+
+export interface ActiveSectionPayload {
+  activeSection: SectionDto | null;
+  stations: StationDto[];
+  trains: TrainDto[];
+  assets: AssetDto[];
+  blocks: BlockDto[];
+}
+
+export interface TelemetryTrain {
+  trainId: string;
+  trainName: string;
+  chainageKm: number;
+  latitude: number | null;
+  longitude: number | null;
+  speedKmh: number;
+  status: string;
+}
+
+export interface TelemetryAsset {
+  assetId: string;
+  assetType: string;
+  locationKm: number;
+  latitude: number | null;
+  longitude: number | null;
+  riskScore: number;
+  status: string;
+}
+
+export interface TelemetryTick {
+  timestamp: string;
+  tickMs: number;
+  sectionId: string | null;
+  trains: TelemetryTrain[];
+  assets: TelemetryAsset[];
+}
+
+export interface DisruptionAlert {
+  type: 'DISRUPTION_INJECTED' | 'STRATEGY_APPLIED' | 'CRITICAL_RISK';
+  message: string;
+  timestamp: string;
+  eventId?: string;
+  assetId?: string;
+  riskScore?: number;
+}
+
+export type ViewId = 'timespace' | 'network' | 'optimizer' | 'disruption' | 'audit';
+
+// --- Milestone 5: optimizer / disruption / audit contracts -----------------
+
+export interface CandidatePlan {
+  planId: string;
+  name: string;
+  f1Delay: number;
+  f2Risk: number;
+  f3Availability: number;
+  score: number;
+  status: 'PARETO_OPTIMAL' | 'CANDIDATE';
+  delayMins: number;
+  blocks: { blockId: string; startKm: number; endKm: number }[];
+  trainIds: string[];
+}
+
+export interface OptimizationSolveResponse {
+  generator: string;
+  divisionId: string | null;
+  weights: { w1: number; w2: number; w3: number };
+  paretoCount: number;
+  plans: CandidatePlan[];
+}
+
+export interface PlanCommitResult {
+  message: string;
+  planId: string;
+  delayMins: number;
+  reTimedTrainIds: string[];
+  appliedAt: string;
+}
+
+export type DisruptionKind = 'SIGNAL_FAILURE' | 'TRACK_INCIDENT' | 'EQUIPMENT_FAILURE';
+export type StrategyType = 'UPSTREAM_HOLDING' | 'TSR_30KMH' | 'EMERGENCY_BLOCK';
+
+export interface RecoveryStrategy {
+  strategyId: string;
+  type: StrategyType;
+  name: string;
+  delayMins: number;
+  earliestFeasibleDeparture: string;
+  affectedTrainIds: string[];
+  reason: string;
+}
+
+export interface DisruptionEvent {
+  eventId: string;
+  type: DisruptionKind;
+  description: string;
+  startKm: number;
+  endKm: number;
+  reportedAt: string;
+}
+
+export interface RegisteredDisruption {
+  event: DisruptionEvent;
+  strategies: RecoveryStrategy[];
+  createdAt: string;
+  resolved: boolean;
+}
+
+export type AuditSeverity = 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'SYSTEM_OVERRIDE';
+
+export interface AuditEntry {
+  id: number;
+  timestamp: string;
+  category: string;
+  severity: AuditSeverity;
+  message: string;
+  details?: unknown;
+}
+
+export interface AuditLogsResponse {
+  count: number;
+  logs: AuditEntry[];
+}
