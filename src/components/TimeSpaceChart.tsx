@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AssetDto, BlockDto, StationDto, TrainDto } from '../types';
+import type { AssetDto, BlockDto, SectionDto, StationDto, TrainDto } from '../types';
 import { drawTimeSpace } from '../tsd/renderTimeSpace';
 import { parseTimeInput } from '../tsd/tsdMath';
 
 interface TimeSpaceChartProps {
   startKm: number;
   endKm: number;
+  activeSection: SectionDto | null;
   stations: readonly StationDto[];
   trains: readonly TrainDto[];
   blocks: readonly BlockDto[];
@@ -16,6 +17,7 @@ interface TimeSpaceChartProps {
 export function TimeSpaceChart({
   startKm,
   endKm,
+  activeSection,
   stations,
   trains,
   blocks,
@@ -41,15 +43,15 @@ export function TimeSpaceChart({
       const rect = wrap.getBoundingClientRect();
       if (rect.width === 0) return;
       canvas.width = Math.round(rect.width * dpr);
-      canvas.height = Math.round(600 * dpr);
-      canvas.style.height = '600px';
+      canvas.height = Math.round(650 * dpr);
+      canvas.style.height = '650px';
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      console.log('Rendering trains count:', trains.length, trains[0]?.schedule ?? trains[0]);
+      console.log('Canvas rendering', { trains: trains.length, section: activeSection });
       drawTimeSpace(ctx, {
         width: rect.width,
-        height: 600,
+        height: 650,
         startKm,
         endKm,
         stations,

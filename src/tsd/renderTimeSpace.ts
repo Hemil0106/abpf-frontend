@@ -43,12 +43,17 @@ const HEAT_SLICES = 40;
 /** Chainage gap below which a live marker sits on a station line and its label must flip below it. */
 const LABEL_FLIP_KM = 12;
 
+/** Java Swing palette: freight in blue, express in yellow. */
 const colorOf = (train: TrainDto) =>
-  train.type === 'FREIGHT' || train.priority >= 3
-    ? '#38bdf8'
-    : train.type === 'EXPRESS' || train.priority === 1
-      ? '#f87171'
-      : '#22d3ee';
+  train.type === 'FREIGHT' || train.priority >= 3 ? '#38bdf8' : '#eab308';
+
+/** A maintenance block window in (time, km) axes, km normalized low→high. */
+interface BlockWindow {
+  startMin: number;
+  endMin: number;
+  startKm: number;
+  endKm: number;
+}
 
 /** Split a stop polyline into its adjacent segments for intersection checks. */
 function segmentsOf(points: { x1: number; y1: number }[]): Segment[] {
@@ -60,11 +65,33 @@ function segmentsOf(points: { x1: number; y1: number }[]): Segment[] {
   }));
 }
 
+/** Point where a trajectory segment enters a block window, or null when it misses. */
+function segmentRectHit(seg: Segment, win: BlockWindow): { x: number; y: number } | null {
+  const yLo = Math.min(win.startKm, win.endKm);
+  const yHi = Math.max(win.startKm, win.endKm);
+  const inside = (px: number, py: number) =>
+    px >= win.startMin && px <= win.endMin && py >= yLo && py <= yHi;
+  if (inside(seg.x1, seg.y1) || inside(seg.x2, seg.y2)) {
+    return inside(seg.x1, seg.y1) ? { x: seg.x1, y: seg.y1 } : { x: seg.x2, y: seg.y2 };
+  }
+  const edges: Segment[] = [
+    { x1: win.startMin, y1: yLo, x2: win.endMin, y2: yLo },
+    { x1: win.startMin, y1: yHi, x2: win.endMin, y2: yHi },
+    { x1: win.startMin, y1: yLo, x2: win.startMin, y2: yHi },
+    { x1: win.endMin, y1: yLo, x2: win.endMin, y2: yHi },
+  ];
+  for (const edge of edges) {
+    const hit = segmentIntersection(seg, edge);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 /**
- * Renders the time-space string diagram. X is minutes-of-day mapped across the
- * full canvas width (day-centred crop at zoom > 1), Y is chainage KM with a
- * 40px gutter. Pure + side-effect-free apart from the given 2D context, so
- * self-checks can drive it with a mock context.
+ * Renders the time-space string diagram (Java Swing engine replicant).
+ * X is minutes-of-day mapped across the full canvas width (day-centred crop at
+ * zoom > 1), Y is chainage KM with a 40px gutter. Pure + side-effect-free apart
+ * from the given 2D context, so self-checks can drive it with a mock context.
  */
 export function drawTimeSpace(
   ctx: CanvasRenderingContext2D,
@@ -93,15 +120,58 @@ export function drawTimeSpace(
     heatSlices: 0,
   };
 
-  // Background grid: thin hour column guides.
-  for (let hour = 0; hour <= 24; hour++) {
+  ctx.font = '11px ui-monospace, monospace';
+
+  // Background grid: dashed horizontal lines at every station KM (section bounds
+  // included) and dashed vertical lines at hourly ticks 00:00 → 23:00.
+  ctx.save();
+  ctx.setLineDash([5, 5]);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.18)';
+  const gridKms = new Set<number>([minKm, maxKm, ...opts.stations.map((s) => s.km)]);
+  for (const km of gridKms) {
+    const y = yOf(km);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+  }
+  for (let hour = 0; hour < 24; hour++) {
     const gx = xOf(hour * 60);
-    ctx.strokeStyle = 'rgba(148, 163, 184, 0.08)';
-    ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(gx, 20);
     ctx.lineTo(gx, height - 20);
     ctx.stroke();
+  }
+  ctx.restore();
+
+  // Station labels along the Y (KM) axis.
+  ctx.fillStyle = '#94a3b8';
+  for (const station of opts.stations) {
+    ctx.fillText(`${station.stationName}  ${station.km}KM`, 6, yOf(station.km) - 3);
+    stats.stations += 1;
+  }
+
+  // Active maintenance block windows (green), used later for conflict detection.
+  const blockWindows: BlockWindow[] = opts.blocks.map((b) => ({
+    startMin: getMinutesFromMidnight(b.startTime),
+    endMin: getMinutesFromMidnight(b.endTime),
+    startKm: Math.min(b.startKm, b.endKm),
+    endKm: Math.max(b.startKm, b.endKm),
+  }));
+
+  if (opts.showBlocks) {
+    ctx.fillStyle = 'rgba(34, 197, 94, 0.2)';
+    ctx.strokeStyle = 'rgba(34, 197, 94, 0.8)';
+    for (const block of opts.blocks) {
+      const x1 = xOf(getMinutesFromMidnight(block.startTime));
+      const x2 = xOf(getMinutesFromMidnight(block.endTime));
+      const y1 = yOf(block.startKm);
+      const y2 = yOf(block.endKm);
+      ctx.fillRect(x1, Math.min(y1, y2), Math.max(2, x2 - x1), Math.abs(y2 - y1));
+      ctx.strokeRect(x1, Math.min(y1, y2), Math.max(2, x2 - x1), Math.abs(y2 - y1));
+      stats.blocks += 1;
+    }
   }
 
   // Heatmap overlay: vertical risk bands by asset failure risk.
@@ -125,39 +195,9 @@ export function drawTimeSpace(
     }
   }
 
-  // Station lines along the Y (KM) axis.
-  ctx.font = '11px ui-monospace, monospace';
-  ctx.fillStyle = '#94a3b8';
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
-  ctx.lineWidth = 1;
-  for (const station of opts.stations) {
-    const y = scale.y(station.km);
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
-    ctx.fillText(`${station.stationName}  ${station.km}KM`, 6, y - 3);
-    stats.stations += 1;
-  }
-
-  // Maintenance blocks: shaded time × chainage rectangles.
-  if (opts.showBlocks) {
-    ctx.fillStyle = 'rgba(245, 158, 11, 0.22)';
-    ctx.strokeStyle = 'rgba(245, 158, 11, 0.8)';
-    for (const block of opts.blocks) {
-      const x1 = xOf(getMinutesFromMidnight(block.startTime));
-      const x2 = xOf(getMinutesFromMidnight(block.endTime));
-      const y1 = yOf(block.startKm);
-      const y2 = yOf(block.endKm);
-      ctx.fillRect(x1, Math.min(y1, y2), Math.max(2, x2 - x1), Math.abs(y2 - y1));
-      ctx.strokeRect(x1, Math.min(y1, y2), Math.max(2, x2 - x1), Math.abs(y2 - y1));
-      stats.blocks += 1;
-    }
-  }
-
   // Train trajectories: one sloped polyline per train over its schedule stops.
-  // Express in red/orange, freight in blue. Fallback stops (origin→destination
-  // times) are generated when no schedule payload is present.
+  // Fallback stops (origin→destination times) are generated when no schedule
+  // payload is present. Labels sit beside the first point (+10 X, +4 Y).
   const polylines = opts.trains.map((train) => ({ train, points: trainStops(train, opts.stations, minKm, maxKm) }));
 
   for (const { train, points } of polylines) {
@@ -174,28 +214,35 @@ export function drawTimeSpace(
     });
     ctx.stroke();
     ctx.fillStyle = '#e2e8f0';
-    ctx.fillText(train.trainId, xOf(points[0].timeMins) + 4, yOf(points[0].km) - 4);
+    ctx.fillText(train.trainId, xOf(points[0].timeMins) + 10, yOf(points[0].km) + 4);
     stats.trains += 1;
   }
 
-  // Conflict halos: red glow at crossing points between train polylines.
-  for (let i = 0; i < polylines.length; i++) {
-    for (let j = i + 1; j < polylines.length; j++) {
-      const a = segmentsOf(polylines[i].points.map((p) => ({ x1: p.timeMins, y1: p.km })));
-      const b = segmentsOf(polylines[j].points.map((p) => ({ x1: p.timeMins, y1: p.km })));
-      for (const sa of a) {
-        for (const sb of b) {
-          const hit = segmentIntersection(sa, sb);
+  // Conflict halos: pulsing red rings where a trajectory cuts an active
+  // maintenance block window.
+  if (opts.showBlocks && blockWindows.length > 0) {
+    const wave = Math.abs(Math.sin(Date.now() / 350));
+    const ringRadius = 14 + 10 * wave;
+    for (const { points } of polylines) {
+      const segs = segmentsOf(points.map((p) => ({ x1: p.timeMins, y1: p.km })));
+      for (const win of blockWindows) {
+        for (const seg of segs) {
+          const hit = segmentRectHit(seg, win);
           if (!hit || !scale.inView(hit.x)) continue;
           const cx = xOf(hit.x);
           const cy = yOf(hit.y);
-          const gradient = ctx.createRadialGradient(cx, cy, 1, cx, cy, 26);
+          const gradient = ctx.createRadialGradient(cx, cy, 1, cx, cy, ringRadius + 12);
           gradient.addColorStop(0, 'rgba(239, 68, 68, 0.9)');
           gradient.addColorStop(1, 'rgba(239, 68, 68, 0)');
           ctx.fillStyle = gradient;
           ctx.beginPath();
-          ctx.arc(cx, cy, 26, 0, Math.PI * 2);
+          ctx.arc(cx, cy, ringRadius + 12, 0, Math.PI * 2);
           ctx.fill();
+          ctx.strokeStyle = '#ef4444';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+          ctx.stroke();
           stats.conflicts += 1;
         }
       }

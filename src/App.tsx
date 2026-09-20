@@ -137,6 +137,7 @@ export function App() {
           <TimeSpaceChart
             startKm={payload.activeSection?.startKm ?? 0}
             endKm={payload.activeSection?.endKm ?? 100}
+            activeSection={payload.activeSection}
             stations={payload.stations}
             trains={payload.trains}
             blocks={payload.blocks}

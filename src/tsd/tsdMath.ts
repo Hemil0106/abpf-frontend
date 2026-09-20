@@ -169,9 +169,10 @@ export function getMinutesFromMidnight(
   return parseTimeInput(timeVal);
 }
 
-/** Full-width minutes-of-day → canvas X; day-centred crop at zoom > 1. */
-export function timeToX(minutes: number, width: number, zoom = 1): number {
-  return timeToXCoordinate(minutes, width, zoom);
+/** Minutes-of-day input → full-width canvas X; day-centred crop at zoom > 1. */
+export function timeToX(timeInput: string | number | Date, width: number, zoom = 1): number {
+  const mins = typeof timeInput === 'number' ? timeInput : getMinutesFromMidnight(timeInput);
+  return timeToXCoordinate(mins, width, zoom);
 }
 
 export interface StopPoint {

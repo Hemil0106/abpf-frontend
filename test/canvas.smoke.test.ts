@@ -104,6 +104,7 @@ test('tsdMath: robust stop parsing, X/Y converters, degenerate-section guards', 
   assert.equal(timeToX(1440, 800), 800, 'timeToX right edge');
   assert.equal(timeToX(720, 800, 3), 400, 'timeToX day-centred zoom');
   assert.equal(timeToX(360, 800), 200, 'timeToX quarter-day');
+  assert.equal(Math.round(timeToX('06:30', 800) * 100) / 100, 216.67, 'timeToX parses bare HH:mm');
 
   assert.equal(kmToY(0, 0, 320, 400), 360, 'min km sits in the bottom gutter');
   assert.equal(kmToY(320, 0, 320, 400), 40, 'max km sits in the top gutter');
@@ -196,10 +197,11 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
   assert.equal(stats.stations, 3);
   assert.equal(stats.trains, 2);
   assert.equal(stats.blocks, 1);
-  assert.equal(stats.conflicts, 1, 'crossing trains must draw a conflict halo');
+  assert.equal(stats.conflicts, 1, 'a train through an active block window must draw a halo');
   assert.equal(stats.live, 1);
   assert.ok(stats.heatSlices > 0, 'heatmap slices must be drawn');
   assert.ok(calls.includes('addColorStop'), 'conflict halo gradient must be built');
+  assert.ok(calls.includes('setLineDash'), 'dashed station/time grid must be drawn');
 });
 
 test('drawNetworkMap: nodes, risk-tinted corridors', () => {
