@@ -1,4 +1,7 @@
+import { useState } from 'react';
 import type { SectionDto, ViewId, ZoneGroup } from '../types';
+import { useAuth } from '../context/AuthContext';
+import { AuthModal } from './AuthModal';
 
 interface HeaderProps {
   zones: ZoneGroup[];
@@ -10,6 +13,7 @@ interface HeaderProps {
 }
 
 const VIEWS: { id: ViewId; label: string }[] = [
+  { id: 'home', label: 'Home' },
   { id: 'timespace', label: 'Time-Space' },
   { id: 'network', label: 'Zonal Network' },
   { id: 'optimizer', label: 'Optimizer' },
@@ -25,6 +29,8 @@ export function Header({
   activeView,
   onViewChange,
 }: HeaderProps) {
+  const { session, logout } = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
   const active = zones
     .flatMap((z) => z.divisions)
     .find((d) => d.divisionId === activeDivisionId);
@@ -103,6 +109,30 @@ export function Header({
           <span className="inline-block h-2 w-2 rounded-full bg-current" />
           {socketConnected ? 'Live Stream Active' : 'Offline — Reconnecting'}
         </span>
+
+        {session ? (
+          <div className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-800 py-1 pl-2 pr-1">
+            <span className="max-w-28 truncate text-xs text-slate-200">{session.username}</span>
+            <span className="rounded-full bg-sky-600/20 px-2 py-0.5 text-[10px] font-semibold uppercase text-sky-300">
+              {session.role}
+            </span>
+            <button
+              onClick={logout}
+              title="Sign out"
+              className="rounded-full px-1.5 text-slate-400 transition-colors hover:text-rose-400"
+            >
+              ×
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setAuthOpen(true)}
+            className="rounded-lg border border-sky-600/50 px-3 py-1.5 text-xs font-medium text-sky-300 transition-colors hover:bg-sky-600 hover:text-white"
+          >
+            Log in
+          </button>
+        )}
+        <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
       </div>
     </header>
   );

@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { DisruptionAlert, DisruptionKind, RegisteredDisruption, StrategyType } from '../types';
-import {
-  errMessage,
-  fetchDisruptions,
-  injectDisruption,
-  resolveDisruption,
-} from '../services/api';
+import { errMessage, fetchDisruptions, injectDisruption, resolveDisruption } from '../services/api';
+import { addActivity } from '../services/activityLog';
+import { useAuth } from '../context/AuthContext';
 
 interface DisruptionResolverProps {
   latestAlert: DisruptionAlert | null;
@@ -25,6 +22,7 @@ const STRATEGY_COLOR: Record<StrategyType, string> = {
 };
 
 export function DisruptionResolver({ latestAlert, onApplied }: DisruptionResolverProps) {
+  const { canDispatch, guardDispatch } = useAuth();
   const [disruptions, setDisruptions] = useState<RegisteredDisruption[]>([]);
   const [applying, setApplying] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState<Record<string, string>>({});
@@ -62,6 +60,7 @@ export function DisruptionResolver({ latestAlert, onApplied }: DisruptionResolve
         });
         setDisruptions((prev) => [...prev, registered]);
         setForm((f) => ({ ...f, description: '' }));
+        addActivity('DISRUPTION', `Injected ${form.type} at KM ${form.startKm}–${form.endKm}`);
       } catch (err) {
         setError(errMessage(err));
       }
@@ -71,6 +70,7 @@ export function DisruptionResolver({ latestAlert, onApplied }: DisruptionResolve
 
   const handleApply = useCallback(
     async (eventId: string, strategyType: StrategyType) => {
+      if (!guardDispatch()) return;
       setApplying((prev) => ({ ...prev, [eventId]: true }));
       setMessage((prev) => ({ ...prev, [eventId]: '' }));
       try {
@@ -82,6 +82,7 @@ export function DisruptionResolver({ latestAlert, onApplied }: DisruptionResolve
         setDisruptions((prev) =>
           prev.map((d) => (d.event.eventId === eventId ? { ...d, resolved: true } : d)),
         );
+        addActivity('DISRUPTION', `Applied ${strategyType} to ${eventId}`);
         onApplied();
       } catch (err) {
         setMessage((prev) => ({ ...prev, [eventId]: errMessage(err) }));
@@ -103,6 +104,11 @@ export function DisruptionResolver({ latestAlert, onApplied }: DisruptionResolve
         >
           ⚠ {active.length} active disruption(s) — recovery strategy required
         </div>
+      )}
+      {!canDispatch && (
+        <p className="text-[11px] text-amber-400">
+          Apply Strategy requires the DISPATCHER or ADMIN role.
+        </p>
       )}
 
       <form

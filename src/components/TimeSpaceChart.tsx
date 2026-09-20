@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AssetDto, BlockDto, StationDto, TrainDto } from '../types';
 import { drawTimeSpace } from '../tsd/renderTimeSpace';
-import { minutesOfDay } from '../tsd/tsdMath';
+import { parseTimeInput } from '../tsd/tsdMath';
 
 interface TimeSpaceChartProps {
   startKm: number;
@@ -41,13 +41,15 @@ export function TimeSpaceChart({
       const rect = wrap.getBoundingClientRect();
       if (rect.width === 0) return;
       canvas.width = Math.round(rect.width * dpr);
-      canvas.height = Math.round(rect.height * dpr);
+      canvas.height = Math.round(600 * dpr);
+      canvas.style.height = '600px';
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      console.log('Rendering trains count:', trains.length, trains[0]?.schedule ?? trains[0]);
       drawTimeSpace(ctx, {
         width: rect.width,
-        height: rect.height,
+        height: 600,
         startKm,
         endKm,
         stations,
@@ -58,7 +60,7 @@ export function TimeSpaceChart({
         zoom,
         showHeatmap,
         showBlocks,
-        cursorMin: minutesOfDay(new Date()),
+        cursorMin: parseTimeInput(new Date()),
       });
     };
 

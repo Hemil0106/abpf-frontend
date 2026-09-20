@@ -21,6 +21,16 @@ export interface ZoneGroup {
   divisions: SectionDto[];
 }
 
+export interface TrainStop {
+  stationName?: string;
+  station?: string;
+  chainageKm?: number;
+  km?: number;
+  arrivalTime?: string;
+  departureTime?: string;
+  time?: string | number;
+}
+
 export interface TrainDto {
   trainId: string;
   trainName: string;
@@ -30,6 +40,11 @@ export interface TrainDto {
   originStation: string;
   destinationStation: string;
   loopLineRequirement: boolean;
+  // Milestone 6: a richer payload may carry a typed train and a stop schedule.
+  type?: 'FREIGHT' | 'EXPRESS' | 'PASSENGER';
+  schedule?: TrainStop[];
+  stops?: TrainStop[];
+  routePoints?: TrainStop[];
 }
 
 export interface AssetDto {
@@ -98,7 +113,32 @@ export interface DisruptionAlert {
   riskScore?: number;
 }
 
-export type ViewId = 'timespace' | 'network' | 'optimizer' | 'disruption' | 'audit';
+export type ViewId = 'home' | 'timespace' | 'network' | 'optimizer' | 'disruption' | 'audit';
+
+// --- Milestone 6: RBAC + activity ticker -----------------------------------
+
+export type Role = 'CONTROLLER' | 'DISPATCHER' | 'ADMIN';
+
+export interface UserSession {
+  username: string;
+  role: Role;
+}
+
+export type ActivitySource =
+  | 'SYSTEM'
+  | 'SECTION'
+  | 'OPTIMIZER'
+  | 'DISRUPTION'
+  | 'TELEMETRY'
+  | 'ALERT'
+  | 'AUTH';
+
+export interface ActivityLine {
+  id: number;
+  ts: string;
+  source: ActivitySource;
+  message: string;
+}
 
 // --- Milestone 5: optimizer / disruption / audit contracts -----------------
 

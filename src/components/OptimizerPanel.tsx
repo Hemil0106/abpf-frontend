@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CandidatePlan } from '../types';
 import { commitPlan, errMessage, solveOptimizer } from '../services/api';
+import { addActivity } from '../services/activityLog';
+import { useAuth } from '../context/AuthContext';
 import { drawParetoScatter } from '../tsd/renderPareto';
 
 interface OptimizerPanelProps {
@@ -23,6 +25,7 @@ const WEIGHT_META = [
 ];
 
 export function OptimizerPanel({ divisionId, onCommitted }: OptimizerPanelProps) {
+  const { canDispatch, guardDispatch } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const plansRef = useRef<CandidatePlan[]>([]);
   const selectedRef = useRef<string | null>(null);
@@ -47,6 +50,7 @@ export function OptimizerPanel({ divisionId, onCommitted }: OptimizerPanelProps)
       const res = await solveOptimizer(divisionId, weights);
       setPlans(res.plans);
       setSelectedPlanId(null);
+      addActivity('OPTIMIZER', `Solved MOMINP: ${res.paretoCount} Pareto plan(s)`);
     } catch (err) {
       setError(errMessage(err));
     } finally {
@@ -58,12 +62,14 @@ export function OptimizerPanel({ divisionId, onCommitted }: OptimizerPanelProps)
     if (!selectedPlanId) return;
     const plan = plansRef.current.find((p) => p.planId === selectedPlanId);
     if (!plan) return;
+    if (!guardDispatch()) return;
     setCommitting(true);
     setError(null);
     setSuccess(null);
     try {
       const res = await commitPlan(plan, weights);
       setSuccess(`${res.message} — ${res.reTimedTrainIds.length} train(s) re-timed`);
+      addActivity('OPTIMIZER', `Committed ${plan.planId} — ${res.reTimedTrainIds.length} train(s) re-timed`);
       onCommitted();
     } catch (err) {
       setError(errMessage(err));
@@ -187,6 +193,11 @@ export function OptimizerPanel({ divisionId, onCommitted }: OptimizerPanelProps)
             >
               {committing ? 'Committing…' : 'Commit Plan'}
             </button>
+            {!canDispatch && (
+              <p className="mt-2 text-[11px] text-amber-400">
+                Commit Plan requires the DISPATCHER or ADMIN role.
+              </p>
+            )}
           </div>
         )}
       </div>
