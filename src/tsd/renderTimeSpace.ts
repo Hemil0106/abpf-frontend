@@ -1,11 +1,11 @@
 import type { AssetDto, BlockDto, StationDto, TrainDto } from '../types';
 import {
-  buildTimeScale,
-  isoToEpochMs,
+  buildDayScale,
+  clockWindow,
   kmOfStation,
+  minutesOfDay,
   riskColor,
   segmentIntersection,
-  timeWindow,
   trainSegment,
 } from './tsdMath';
 
@@ -23,7 +23,8 @@ export interface TimeSpaceRenderOptions {
   zoom: number;
   showHeatmap: boolean;
   showBlocks: boolean;
-  cursorMs: number;
+  /** cursor position on the day axis, minutes since midnight. */
+  cursorMin: number;
 }
 
 export interface RenderStats {
@@ -37,8 +38,12 @@ export interface RenderStats {
 
 const HEAT_SLICES = 40;
 
+/** Chainage gap below which a live marker sits on a station line and its label must flip below it. */
+const LABEL_FLIP_KM = 12;
+
 /**
- * Renders the time-space string diagram. Pure + side-effect-free apart from the
+ * Renders the time-space string diagram. X is minutes-of-day mapped across the
+ * full canvas width, Y is chainage KM. Pure + side-effect-free apart from the
  * given 2D context, so self-checks can drive it with a mock context.
  */
 export function drawTimeSpace(
@@ -53,16 +58,8 @@ export function drawTimeSpace(
   const kmOf = (name: string | null) =>
     kmOfStation(name, opts.stations, opts.startKm, opts.endKm);
 
-  const trainEvents = opts.trains.flatMap((t) => [
-    isoToEpochMs(t.departureTime),
-    isoToEpochMs(t.arrivalTime),
-  ]);
-  const blockEvents = opts.blocks.flatMap((b) => [
-    isoToEpochMs(b.startTime),
-    isoToEpochMs(b.endTime),
-  ]);
-  const { minMs, visibleMs } = timeWindow(trainEvents, blockEvents, opts.cursorMs, opts.zoom);
-  const scale = buildTimeScale({ width, height, startKm: opts.startKm, endKm: opts.endKm, minMs, visibleMs });
+  const { startMin, endMin } = clockWindow(opts.cursorMin, opts.zoom);
+  const scale = buildDayScale({ width, height, startKm: opts.startKm, endKm: opts.endKm, startMin, endMin });
 
   const stats: RenderStats = {
     stations: 0,
@@ -112,8 +109,8 @@ export function drawTimeSpace(
     ctx.fillStyle = 'rgba(245, 158, 11, 0.22)';
     ctx.strokeStyle = 'rgba(245, 158, 11, 0.8)';
     for (const block of opts.blocks) {
-      const x1 = scale.x(isoToEpochMs(block.startTime));
-      const x2 = scale.x(isoToEpochMs(block.endTime));
+      const x1 = scale.x(minutesOfDay(block.startTime));
+      const x2 = scale.x(minutesOfDay(block.endTime));
       const y1 = scale.y(block.startKm);
       const y2 = scale.y(block.endKm);
       ctx.fillRect(x1, Math.min(y1, y2), Math.max(2, x2 - x1), Math.abs(y2 - y1));
@@ -122,9 +119,9 @@ export function drawTimeSpace(
     }
   }
 
-  // Train trajectories (sloped lines from departure to arrival).
+  // Train trajectories: one sloped line per train from origin to destination
+  // stop, drawn only when either endpoint is inside the visible window.
   const segments = opts.trains.map((t) => ({ train: t, seg: trainSegment(t, kmOf) }));
-  const priorities = [...new Set(opts.trains.map((t) => t.priority))].sort();
   const colorOf = (priority: number) =>
     priority <= 1 ? '#38bdf8' : priority <= 2 ? '#818cf8' : priority <= 3 ? '#a3e635' : '#22d3ee';
 
@@ -159,18 +156,22 @@ export function drawTimeSpace(
     }
   }
 
-  // Live train markers at the cursor time.
+  // Live train markers at the cursor time; flip the label below the marker
+  // when it sits on/near a station line so it never collides with the station
+  // label drawn just above the line.
   for (const [trainId, ch] of Object.entries(opts.live)) {
     if (ch < opts.startKm || ch > opts.endKm) continue;
-    const x = scale.x(opts.cursorMs);
+    const x = scale.x(opts.cursorMin);
     const y = scale.y(ch);
     ctx.strokeStyle = '#f87171';
     ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.arc(x, y, 6, 0, Math.PI * 2);
     ctx.stroke();
+    const nearStation = opts.stations.some((s) => Math.abs(s.km - ch) < LABEL_FLIP_KM);
+    const labelY = nearStation ? y + 16 : y - 8;
     ctx.fillStyle = '#fecaca';
-    ctx.fillText(trainId, x + 8, y - 8);
+    ctx.fillText(trainId, x + 8, labelY);
     stats.live += 1;
   }
 

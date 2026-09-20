@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AssetDto, BlockDto, StationDto, TrainDto } from '../types';
 import { drawTimeSpace } from '../tsd/renderTimeSpace';
+import { minutesOfDay } from '../tsd/tsdMath';
 
 interface TimeSpaceChartProps {
   startKm: number;
@@ -57,7 +58,7 @@ export function TimeSpaceChart({
         zoom,
         showHeatmap,
         showBlocks,
-        cursorMs: Date.now(),
+        cursorMin: minutesOfDay(new Date()),
       });
     };
 

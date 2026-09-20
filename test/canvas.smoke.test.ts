@@ -2,12 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AssetDto, BlockDto, CandidatePlan, StationDto, TrainDto } from '../src/types';
 import {
-  buildTimeScale,
-  isoToEpochMs,
+  buildDayScale,
+  clockWindow,
   kmOfStation,
+  minutesOfDay,
   riskLevel,
   segmentIntersection,
-  timeWindow,
   trainSegment,
 } from '../src/tsd/tsdMath';
 import { mockCtx } from './helpers';
@@ -15,13 +15,21 @@ import { drawTimeSpace } from '../src/tsd/renderTimeSpace';
 import { drawNetworkMap, ZoneNode } from '../src/tsd/renderNetworkMap';
 import { drawParetoScatter } from '../src/tsd/renderPareto';
 
-const iso = (h: string, m: number) => {
-  const d = new Date('2026-09-20T00:00:00Z');
-  d.setMinutes(m);
-  return d;
+/** Local 'YYYY-MM-DDTHH:mm:00' string — matches the backend's timezone-less format. */
+const localIso = (hh: number, mm: number) => {
+  const d = new Date(2026, 8, 20, hh, mm, 0);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(hh)}:${p(mm)}:00`;
 };
 
-test('tsdMath: station→km resolution, train segments, conflicts', () => {
+test('tsdMath: minutes-of-day axis, station→km, sloped segments, conflicts', () => {
+  assert.equal(minutesOfDay('2026-09-20T00:00:00'), 0);
+  assert.equal(minutesOfDay(localIso(6, 30)), 390);
+  assert.equal(minutesOfDay(localIso(23, 45)), 1425);
+  assert.equal(clockWindow(480, 1).startMin, 0, 'zoom 1 must show the full day');
+  assert.equal(clockWindow(480, 1).endMin, 1440);
+  assert.ok(clockWindow(720, 3).endMin < 1440, 'zoom >1 must crop around the cursor');
+
   const stations: StationDto[] = [
     { stationName: 'MMCT', km: 0 },
     { stationName: 'BRC', km: 160 },
@@ -31,38 +39,38 @@ test('tsdMath: station→km resolution, train segments, conflicts', () => {
 
   const t1: TrainDto = {
     trainId: 'T1', trainName: 'U1', priority: 1,
-    departureTime: iso('06:00', 0).toISOString(),
-    arrivalTime: iso('10:00', 240).toISOString(),
+    departureTime: localIso(6, 0),
+    arrivalTime: localIso(10, 0),
     originStation: 'MMCT', destinationStation: 'BRC', loopLineRequirement: false,
   };
   const t2: TrainDto = {
     trainId: 'T2', trainName: 'U2', priority: 2,
-    departureTime: iso('06:30', 30).toISOString(),
-    arrivalTime: iso('10:30', 270).toISOString(),
+    departureTime: localIso(6, 30),
+    arrivalTime: localIso(10, 30),
     originStation: 'BRC', destinationStation: 'MMCT', loopLineRequirement: false,
   };
   const kmOf = (name: string | null) => kmOfStation(name, stations, 0, 320);
   const s1 = trainSegment(t1, kmOf);
   const s2 = trainSegment(t2, kmOf);
-  assert.ok(segmentIntersection(s1, s2), 'crossing trains must intersect');
+  assert.equal(s1.x1, 360, 'departure maps to minutes-of-day');
+  assert.equal(s1.x2, 600, 'arrival maps to minutes-of-day');
+  assert.equal(s1.y1, 0);
+  assert.equal(s1.y2, 160);
+  assert.ok(segmentIntersection(s1, s2), 'opposite-slope trains must intersect');
 
   assert.equal(riskLevel(0.1), 'clear');
   assert.equal(riskLevel(0.5), 'caution');
   assert.equal(riskLevel(0.9), 'critical');
 
-  const tw = timeWindow(
-    [isoToEpochMs(t1.departureTime), isoToEpochMs(t1.arrivalTime)],
-    [],
-    iso('08:00', 120).getTime(),
-    1,
-  );
-  assert.ok(tw.visibleMs > 0);
-  const scale = buildTimeScale({ width: 800, height: 400, startKm: 0, endKm: 320, minMs: tw.minMs, visibleMs: tw.visibleMs });
+  const scale = buildDayScale({ width: 800, height: 400, startKm: 0, endKm: 320, startMin: 0, endMin: 1440 });
+  assert.equal(scale.x(0), 0, 'midnight maps to the left edge');
+  assert.equal(scale.x(1440), 800, 'end-of-day maps across the full width');
   assert.equal(scale.y(0), 400);
   assert.equal(scale.y(320), 0);
+  assert.ok(scale.inView(720));
 });
 
-test('drawTimeSpace: stations, crossing conflict halo, blocks, live marker', () => {
+test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live marker', () => {
   const stations: StationDto[] = [
     { stationName: 'MMCT', km: 0 },
     { stationName: 'BRC', km: 160 },
@@ -71,22 +79,22 @@ test('drawTimeSpace: stations, crossing conflict halo, blocks, live marker', () 
   const trains: TrainDto[] = [
     {
       trainId: 'T1', trainName: 'U1', priority: 1,
-      departureTime: iso('06:00', 0).toISOString(),
-      arrivalTime: iso('10:00', 240).toISOString(),
+      departureTime: localIso(6, 0),
+      arrivalTime: localIso(10, 0),
       originStation: 'MMCT', destinationStation: 'BRC', loopLineRequirement: false,
     },
     {
       trainId: 'T2', trainName: 'U2', priority: 2,
-      departureTime: iso('06:30', 30).toISOString(),
-      arrivalTime: iso('10:30', 270).toISOString(),
+      departureTime: localIso(6, 30),
+      arrivalTime: localIso(10, 30),
       originStation: 'BRC', destinationStation: 'MMCT', loopLineRequirement: false,
     },
   ];
   const blocks: BlockDto[] = [
     {
       blockId: 'B1', sectionId: 'WR-MMCT-01', startKm: 100, endKm: 200,
-      startTime: iso('07:00', 60).toISOString(),
-      endTime: iso('08:00', 120).toISOString(),
+      startTime: localIso(7, 0),
+      endTime: localIso(8, 0),
       requiredDurationMinutes: 60, blockPriority: 1,
     },
   ];
@@ -95,6 +103,7 @@ test('drawTimeSpace: stations, crossing conflict halo, blocks, live marker', () 
   ];
 
   const { ctx, calls } = mockCtx();
+  // Live train sitting exactly on the BRC station line (km 160).
   const stats = drawTimeSpace(ctx, {
     width: 800,
     height: 400,
@@ -104,11 +113,11 @@ test('drawTimeSpace: stations, crossing conflict halo, blocks, live marker', () 
     trains,
     blocks,
     assets,
-    live: { T1: 120 },
+    live: { T1: 160 },
     zoom: 1,
     showHeatmap: true,
     showBlocks: true,
-    cursorMs: iso('08:00', 120).getTime(),
+    cursorMin: 480,
   });
 
   assert.equal(stats.stations, 3);
