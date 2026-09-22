@@ -162,7 +162,7 @@ export function drawTimeSpace(
   ctx.font = '11px ui-monospace, monospace';
 
   // Background grid: dashed horizontal lines at every station KM (section bounds
-  // included) and dashed vertical lines at hourly ticks 00:00 → 23:00.
+  // included) and dashed vertical lines at 2-hour X-axis ticks 00:00 → 24:00.
   ctx.save();
   ctx.setLineDash([5, 5]);
   ctx.lineWidth = 1;
@@ -175,14 +175,23 @@ export function drawTimeSpace(
     ctx.lineTo(width, y);
     ctx.stroke();
   }
-  for (let hour = 0; hour < 24; hour++) {
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  for (let hour = 0; hour <= 24; hour += 2) {
     const gx = xOf(hour * 60);
     ctx.beginPath();
     ctx.moveTo(gx, 20);
-    ctx.lineTo(gx, height - 20);
+    ctx.lineTo(gx, height - 40);
     ctx.stroke();
   }
   ctx.restore();
+
+  // Explicit X-axis time labels (every 2 hours) in the bottom padding.
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = '11px monospace';
+  for (let hour = 0; hour <= 24; hour += 2) {
+    const label = `${String(hour).padStart(2, '0')}:00`;
+    ctx.fillText(label, xOf(hour * 60) - 15, height - 12);
+  }
 
   // Station labels along the Y (KM) axis.
   ctx.fillStyle = '#94a3b8';

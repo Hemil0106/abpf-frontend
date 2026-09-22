@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AssetDto, BlockDto, SectionDto, StationDto, TrainDto, TrainLive } from '../types';
 import { drawTimeSpace, type BlockHit, type LiveHit } from '../tsd/renderTimeSpace';
-import { parseTimeToMinutes, trainDelayMins } from '../tsd/tsdMath';
+import { parseTimeToMinutes, trainDelayMins, trainStops } from '../tsd/tsdMath';
 
 interface TimeSpaceChartProps {
   startKm: number;
@@ -30,6 +30,11 @@ function LegendDot({ color, label }: { color: string; label: string }) {
   );
 }
 
+/** Stable per-category cruise speed (km/h) for drift-free interpolation:
+ * Express 80–110, Freight 40–60, mid-range chosen so motion never jitters. */
+const categorySpeed = (train: TrainDto | undefined): number =>
+  train?.type === 'FREIGHT' ? 50 : 95;
+
 export function TimeSpaceChart({
   startKm,
   endKm,
@@ -45,6 +50,7 @@ export function TimeSpaceChart({
   const liveRef = useRef(live);
   liveRef.current = live;
   const hitsRef = useRef<{ blocks: BlockHit[]; live: LiveHit[] }>({ blocks: [], live: [] });
+  const glidesRef = useRef<Record<string, { km: number; speedKmh: number }>>({});
 
   const [zoom, setZoom] = useState(1);
   const [showHeatmap, setShowHeatmap] = useState(false);
@@ -69,6 +75,33 @@ export function TimeSpaceChart({
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       console.log('Canvas rendering', { trains: trains.length, section: activeSection });
+
+      // Smooth telemetry motion: lerp each train's KM toward its target every
+      // frame (0.05 factor per spec); when the last tick is stale, fall back to
+      // a steady speed-based advance along the section so markers glide instead
+      // of freezing or jumping across vertical lines.
+      const nowMin = parseTimeToMinutes(new Date());
+      const nextSlides: Record<string, TrainLive> = {};
+      const nextGlides: Record<string, { km: number; speedKmh: number }> = {};
+      for (const [trainId, target] of Object.entries(liveRef.current)) {
+        const train = trains.find((t) => t.trainId === trainId);
+        const speedKmh = target.speedKmh > 0 ? target.speedKmh : categorySpeed(train);
+        const stale = Math.abs(nowMin - target.mins) > 5;
+        let targetKm = target.km;
+        if (stale && train) {
+          const origin = trainStops(train, stations, startKm, endKm)[0];
+          const hours = (nowMin - origin.timeMins) / 60;
+          const lo = Math.min(startKm, endKm);
+          const hi = Math.max(startKm, endKm);
+          targetKm = Math.max(lo, Math.min(hi, origin.km + hours * speedKmh));
+        }
+        const prev = glidesRef.current[trainId];
+        const km = prev ? prev.km + (targetKm - prev.km) * 0.05 : targetKm;
+        nextGlides[trainId] = { km, speedKmh };
+        nextSlides[trainId] = { km, mins: target.mins, speedKmh };
+      }
+      glidesRef.current = nextGlides;
+
       const stats = drawTimeSpace(ctx, {
         width: rect.width,
         height: 650,
@@ -78,12 +111,12 @@ export function TimeSpaceChart({
         trains,
         blocks,
         assets,
-        live: liveRef.current,
+        live: nextSlides,
         zoom,
         showHeatmap,
         showBlocks,
         conflictsOnly,
-        cursorMin: parseTimeToMinutes(new Date()),
+        cursorMin: nowMin,
       });
       hitsRef.current = { blocks: stats.blockHits, live: stats.liveHits };
     };
