@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { DisruptionAlert, TelemetryTick, ViewId, ZoneGroup } from './types';
+import type { DisruptionAlert, TelemetryTick, TrainLive, ViewId, ZoneGroup } from './types';
 import { fetchActiveSection, fetchSections, selectSection } from './services/api';
 import { createTelemetrySocket } from './services/socket';
 import { addActivity } from './services/activityLog';
+import { getMinutesFromMidnight } from './tsd/tsdMath';
 import { Header } from './components/Header';
 import { HomePage } from './components/HomePage';
 import { Toasts } from './components/Toasts';
@@ -19,7 +20,7 @@ export function App() {
   const [activeView, setActiveView] = useState<ViewId>('home');
   const [socketConnected, setSocketConnected] = useState(false);
   const [alerts, setAlerts] = useState<DisruptionAlert[]>([]);
-  const [live, setLive] = useState<Record<string, number>>({});
+  const [live, setLive] = useState<Record<string, TrainLive>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -52,8 +53,16 @@ export function App() {
       addActivity('SYSTEM', 'Telemetry socket disconnected');
     });
     socket.on('telemetry_tick', (tick: TelemetryTick) => {
-      const next: Record<string, number> = {};
-      for (const train of tick.trains) next[train.trainId] = train.chainageKm;
+      const next: Record<string, TrainLive> = {};
+      for (const train of tick.trains) {
+        next[train.trainId] = {
+          km: train.chainageKm,
+          mins: getMinutesFromMidnight(
+            train.currentPosition?.time ?? train.currentPosition?.timestamp ?? tick.timestamp,
+          ),
+          speedKmh: train.speedKmh ?? 0,
+        };
+      }
       setLive(next);
       addActivity('TELEMETRY', `Live tick — ${tick.trains.length} train(s), ${tick.assets.length} asset(s)`);
     });

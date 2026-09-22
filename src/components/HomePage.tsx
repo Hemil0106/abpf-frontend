@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import type { ActiveSectionPayload, ActivityLine } from '../types';
+import type { ActiveSectionPayload, ActivityLine, TrainLive } from '../types';
 import { activitySnapshot, subscribeActivity } from '../services/activityLog';
 import { parseTimeInput, trainDelayMins } from '../tsd/tsdMath';
 
 interface HomePageProps {
   data: ActiveSectionPayload | null;
-  live: Readonly<Record<string, number>>;
+  live: Readonly<Record<string, TrainLive>>;
 }
 
 const SOURCE_STYLE: Record<ActivityLine['source'], string> = {
@@ -55,7 +55,7 @@ export function HomePage({ data, live }: HomePageProps) {
 
   const nowMin = parseTimeInput(new Date());
   const delays = section
-    ? trains.map((t) => trainDelayMins(t, section.startKm, section.endKm, nowMin, live[t.trainId]))
+    ? trains.map((t) => trainDelayMins(t, section.startKm, section.endKm, nowMin, live[t.trainId]?.km))
     : [];
   const avgDelay = delays.length ? Math.round(delays.reduce((a, b) => a + b, 0) / delays.length) : 0;
   const criticalAssets = assets.filter((a) => a.failureRiskScore > 0.6).length;

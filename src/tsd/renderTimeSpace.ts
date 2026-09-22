@@ -1,4 +1,4 @@
-import type { AssetDto, BlockDto, StationDto, TrainDto } from '../types';
+import type { AssetDto, BlockDto, StationDto, TrainDto, TrainLive } from '../types';
 import {
   buildDayScale,
   getMinutesFromMidnight,
@@ -20,13 +20,29 @@ export interface TimeSpaceRenderOptions {
   trains: readonly TrainDto[];
   blocks: readonly BlockDto[];
   assets: readonly AssetDto[];
-  /** live trainId → current chainage Km, from the telemetry feed. */
-  live: Readonly<Record<string, number>>;
+  /** live trainId → current position snapshot from the telemetry feed. */
+  live: Readonly<Record<string, TrainLive>>;
   zoom: number;
   showHeatmap: boolean;
   showBlocks: boolean;
   /** cursor position on the day axis, minutes since midnight. */
   cursorMin: number;
+}
+
+/** Maintenance block window bounding box, in CSS pixels (for hit testing). */
+export interface BlockHit {
+  blockId: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Live train marker position, in CSS pixels (for hit testing). */
+export interface LiveHit {
+  trainId: string;
+  x: number;
+  y: number;
 }
 
 export interface RenderStats {
@@ -36,6 +52,8 @@ export interface RenderStats {
   conflicts: number;
   live: number;
   heatSlices: number;
+  blockHits: BlockHit[];
+  liveHits: LiveHit[];
 }
 
 const HEAT_SLICES = 40;
@@ -118,6 +136,8 @@ export function drawTimeSpace(
     conflicts: 0,
     live: 0,
     heatSlices: 0,
+    blockHits: [],
+    liveHits: [],
   };
 
   ctx.font = '11px ui-monospace, monospace';
@@ -161,16 +181,21 @@ export function drawTimeSpace(
   }));
 
   if (opts.showBlocks) {
-    ctx.fillStyle = 'rgba(34, 197, 94, 0.2)';
-    ctx.strokeStyle = 'rgba(34, 197, 94, 0.8)';
+    ctx.fillStyle = 'rgba(34, 197, 94, 0.25)';
+    ctx.strokeStyle = '#22c55e';
     for (const block of opts.blocks) {
       const x1 = xOf(getMinutesFromMidnight(block.startTime));
       const x2 = xOf(getMinutesFromMidnight(block.endTime));
       const y1 = yOf(block.startKm);
       const y2 = yOf(block.endKm);
-      ctx.fillRect(x1, Math.min(y1, y2), Math.max(2, x2 - x1), Math.abs(y2 - y1));
-      ctx.strokeRect(x1, Math.min(y1, y2), Math.max(2, x2 - x1), Math.abs(y2 - y1));
+      const bx = x1;
+      const by = Math.min(y1, y2);
+      const bw = Math.max(2, x2 - x1);
+      const bh = Math.abs(y2 - y1);
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeRect(bx, by, bw, bh);
       stats.blocks += 1;
+      stats.blockHits.push({ blockId: block.blockId, x: bx, y: by, w: bw, h: bh });
     }
   }
 
@@ -249,23 +274,25 @@ export function drawTimeSpace(
     }
   }
 
-  // Live train markers at the cursor time; flip the label below the marker
-  // when it sits on/near a station line so it never collides with the station
-  // label drawn just above the line.
-  for (const [trainId, ch] of Object.entries(opts.live)) {
-    if (ch < minKm || ch > maxKm) continue;
-    const mx = xOf(opts.cursorMin);
-    const my = yOf(ch);
+  // Live train markers at each train's most recent reported position time
+  // (falls back to the cursor time when the feed reports no per-train time);
+  // the label flips below the marker when it sits on/near a station line so it
+  // never collides with the station label drawn just above the line.
+  for (const [trainId, pos] of Object.entries(opts.live)) {
+    if (pos.km < minKm || pos.km > maxKm) continue;
+    const mx = xOf(pos.mins ?? opts.cursorMin);
+    const my = yOf(pos.km);
     ctx.strokeStyle = '#f87171';
     ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.arc(mx, my, 6, 0, Math.PI * 2);
     ctx.stroke();
-    const nearStation = opts.stations.some((s) => Math.abs(s.km - ch) < LABEL_FLIP_KM);
+    const nearStation = opts.stations.some((s) => Math.abs(s.km - pos.km) < LABEL_FLIP_KM);
     const labelY = nearStation ? my + 16 : my - 8;
     ctx.fillStyle = '#fecaca';
     ctx.fillText(trainId, mx + 8, labelY);
     stats.live += 1;
+    stats.liveHits.push({ trainId, x: mx, y: my });
   }
 
   return stats;

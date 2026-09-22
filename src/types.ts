@@ -84,6 +84,11 @@ export interface TelemetryTrain {
   longitude: number | null;
   speedKmh: number;
   status: string;
+  /** When present, the wall-clock time the position was reported. */
+  currentPosition?: {
+    time?: string | number;
+    timestamp?: string | number;
+  };
 }
 
 export interface TelemetryAsset {
@@ -138,6 +143,14 @@ export interface ActivityLine {
   ts: string;
   source: ActivitySource;
   message: string;
+}
+
+/** Live telemetry snapshot of a train, as kept by the control desk. */
+export interface TrainLive {
+  km: number;
+  /** minutes since midnight the position was reported. */
+  mins: number;
+  speedKmh: number;
 }
 
 // --- Milestone 5: optimizer / disruption / audit contracts -----------------

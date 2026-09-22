@@ -187,7 +187,7 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
     trains,
     blocks,
     assets,
-    live: { T1: 160 },
+    live: { T1: { km: 160, mins: 480, speedKmh: 65 } },
     zoom: 1,
     showHeatmap: true,
     showBlocks: true,
@@ -202,6 +202,13 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
   assert.ok(stats.heatSlices > 0, 'heatmap slices must be drawn');
   assert.ok(calls.includes('addColorStop'), 'conflict halo gradient must be built');
   assert.ok(calls.includes('setLineDash'), 'dashed station/time grid must be drawn');
+
+  assert.equal(stats.blockHits.length, 1, 'block hit box must be reported for hover');
+  assert.equal(stats.blockHits[0].blockId, 'B1');
+  assert.ok(stats.blockHits[0].w > 0 && stats.blockHits[0].h > 0, 'block hit box must be non-empty');
+  assert.equal(stats.liveHits.length, 1, 'live marker hit position must be reported for hover');
+  assert.equal(stats.liveHits[0].trainId, 'T1');
+  assert.equal(Math.round(stats.liveHits[0].x), Math.round(timeToX(480, 800)), 'live marker X follows its reported time');
 });
 
 test('drawNetworkMap: nodes, risk-tinted corridors', () => {
