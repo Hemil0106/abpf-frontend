@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AssetDto, BlockDto, SectionDto, StationDto, TrainDto, TrainLive } from '../types';
 import { drawTimeSpace, type BlockHit, type LiveHit } from '../tsd/renderTimeSpace';
-import { getMinutesFromMidnight, trainDelayMins } from '../tsd/tsdMath';
+import { parseTimeToMinutes, trainDelayMins } from '../tsd/tsdMath';
 
 interface TimeSpaceChartProps {
   startKm: number;
@@ -83,7 +83,7 @@ export function TimeSpaceChart({
         showHeatmap,
         showBlocks,
         conflictsOnly,
-        cursorMin: getMinutesFromMidnight(new Date()),
+        cursorMin: parseTimeToMinutes(new Date()),
       });
       hitsRef.current = { blocks: stats.blockHits, live: stats.liveHits };
     };
@@ -140,8 +140,8 @@ export function TimeSpaceChart({
     if (hover.type === 'block') {
       const block = blocks.find((b) => b.blockId === hover.id);
       if (!block) return null;
-      const startMin = getMinutesFromMidnight(block.startTime);
-      const endMin = getMinutesFromMidnight(block.endTime);
+      const startMin = parseTimeToMinutes(block.startTime);
+      const endMin = parseTimeToMinutes(block.endTime);
       const lo = Math.min(block.startKm, block.endKm);
       const hi = Math.max(block.startKm, block.endKm);
       const risk = assets.reduce(
@@ -169,7 +169,7 @@ export function TimeSpaceChart({
     const train = trains.find((t) => t.trainId === hover.id);
     if (!train) return null;
     const pos = liveRef.current[hover.id];
-    const delay = trainDelayMins(train, startKm, endKm, getMinutesFromMidnight(new Date()), pos?.km);
+    const delay = trainDelayMins(train, startKm, endKm, parseTimeToMinutes(new Date()), pos?.km);
     return (
       <div>
         <div className="text-xs font-semibold text-sky-300">
@@ -242,8 +242,8 @@ export function TimeSpaceChart({
         </label>
         <span className="h-6 w-px bg-[#2A3550]" />
         <div className="flex items-center gap-4">
-          <LegendDot color="#2196F3" label="High-Priority Express" />
-          <LegendDot color="#FFC107" label="Freight / Local" />
+          <LegendDot color="#38bdf8" label="Express / Passenger" />
+          <LegendDot color="#eab308" label="Freight / Local" />
           <LegendDot color="#4CAF50" label="Active Block" />
           <LegendDot color="#E53935" label="Conflict Point" />
         </div>

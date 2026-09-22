@@ -63,9 +63,9 @@ const HEAT_SLICES = 40;
 /** Chainage gap below which a live marker sits on a station line and its label must flip below it. */
 const LABEL_FLIP_KM = 12;
 
-/** Desktop palette: high-priority express in blue, freight/local in amber. */
+/** Sloped line palette: freight amber, everything else sky blue (desktop legend). */
 const colorOf = (train: TrainDto) =>
-  train.type === 'FREIGHT' || train.priority >= 3 ? '#FFC107' : '#2196F3';
+  train.type === 'FREIGHT' ? '#eab308' : '#38bdf8';
 
 /** A maintenance block window in (time, km) axes, km normalized low→high. */
 interface BlockWindow {
@@ -107,11 +107,28 @@ function segmentRectHit(seg: Segment, win: BlockWindow): { x: number; y: number 
   return null;
 }
 
+/** Live marker sits on the train's string: interpolate the time at which the
+ * schedule crosses the live chainage, so trains never stack on one X. */
+function timeAtKmOnSchedule(points: { timeMins: number; km: number }[], km: number): number | null {
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const lo = Math.min(a.km, b.km);
+    const hi = Math.max(a.km, b.km);
+    if (km >= lo && km <= hi) {
+      const ratio = (km - lo) / Math.max(1e-9, hi - lo);
+      return a.timeMins + ratio * (b.timeMins - a.timeMins);
+    }
+  }
+  return null;
+}
+
 /**
  * Renders the time-space string diagram (Java Swing engine replicant).
- * X is minutes-of-day mapped across the full canvas width (day-centred crop at
- * zoom > 1), Y is chainage KM with a 40px gutter. Pure + side-effect-free apart
- * from the given 2D context, so self-checks can drive it with a mock context.
+ * X is minutes-of-day mapped across the padded horizontal axis (80px left gutter
+ * for the KM/Y labels, 40px right), Y is chainage KM with a 40px gutter. Pure +
+ * side-effect-free apart from the given 2D context, so self-checks can drive it
+ * with a mock context.
  */
 export function drawTimeSpace(
   ctx: CanvasRenderingContext2D,
@@ -277,18 +294,26 @@ export function drawTimeSpace(
     }
   }
 
-  // Live train markers at each train's most recent reported position time
-  // (falls back to the cursor time when the feed reports no per-train time);
-  // the label flips below the marker when it sits on/near a station line so it
-  // never collides with the station label drawn just above the line.
+  // Live train markers: a pulsing red ring at each train's current position
+// sitting ON its own trajectory string (live chainage interpolated against the
+// schedule). Trains without a schedule crossover fall back to their reported
+// position time, then the cursor time — never a shared mid-canvas X. The label
+// flips below the marker when it sits on/near a station line.
+  const liveWave = Math.abs(Math.sin(Date.now() / 350));
   for (const [trainId, pos] of Object.entries(opts.live)) {
     if (pos.km < minKm || pos.km > maxKm) continue;
-    const mx = xOf(pos.mins ?? opts.cursorMin);
+    const trainPoly = polylines.find((p) => p.train.trainId === trainId);
+    const onTrajectory = trainPoly ? timeAtKmOnSchedule(trainPoly.points, pos.km) : null;
+    const mx = xOf(onTrajectory ?? pos.mins ?? opts.cursorMin);
     const my = yOf(pos.km);
-    ctx.strokeStyle = '#f87171';
+    const liveRadius = 10 + 4 * liveWave;
+    ctx.strokeStyle = '#ef4444';
     ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.arc(mx, my, 6, 0, Math.PI * 2);
+    ctx.arc(mx, my, liveRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(mx, my, Math.max(2, liveRadius - 5), 0, Math.PI * 2);
     ctx.stroke();
     const nearStation = opts.stations.some((s) => Math.abs(s.km - pos.km) < LABEL_FLIP_KM);
     const labelY = nearStation ? my + 16 : my - 8;

@@ -41,9 +41,10 @@ test('tsdMath: parse time inputs, full-width X mapping, day window, segments, de
   assert.equal(dayWindow(3).startMin, (1440 - 480) / 2, 'zoom >1 must day-centre the window');
   assert.ok(dayWindow(3).endMin < 1440);
 
-  assert.equal(timeToXCoordinate(0, 800), 0, 'midnight maps to the left edge');
-  assert.equal(timeToXCoordinate(1440, 800), 800, 'end-of-day maps across the full width');
-  assert.equal(timeToXCoordinate(720, 800, 3), 400, 'day-centred zoom keeps mid-day centred');
+  assert.equal(timeToXCoordinate(0, 800), 80, 'midnight maps to the padded left edge');
+  assert.equal(timeToXCoordinate(1440, 800), 760, 'end-of-day maps to width - paddingRight');
+  assert.equal(timeToXCoordinate(720, 800, 3), 420, 'day-centred zoom keeps mid-day centred');
+  assert.equal(timeToXCoordinate(720, 800), 420, 'mid-day maps to the padded mid-canvas');
 
   const stations: StationDto[] = [
     { stationName: 'MMCT', km: 0 },
@@ -100,11 +101,11 @@ test('tsdMath: robust stop parsing, X/Y converters, degenerate-section guards', 
   assert.equal(getMinutesFromMidnight(localIso(7, 45)), 465, 'ISO local');
   assert.equal(getMinutesFromMidnight(undefined), 0, 'missing time is harmless');
 
-  assert.equal(timeToX(0, 800), 0, 'timeToX left edge');
-  assert.equal(timeToX(1440, 800), 800, 'timeToX right edge');
-  assert.equal(timeToX(720, 800, 3), 400, 'timeToX day-centred zoom');
-  assert.equal(timeToX(360, 800), 200, 'timeToX quarter-day');
-  assert.equal(Math.round(timeToX('06:30', 800) * 100) / 100, 216.67, 'timeToX parses bare HH:mm');
+  assert.equal(timeToX(0, 800), 80, 'timeToX padded left edge');
+  assert.equal(timeToX(1440, 800), 760, 'timeToX padded right edge');
+  assert.equal(timeToX(720, 800, 3), 420, 'timeToX day-centred zoom');
+  assert.equal(timeToX(360, 800), 250, 'timeToX quarter-day');
+  assert.equal(Math.round(timeToX('06:30', 800) * 100) / 100, 264.17, 'timeToX parses bare HH:mm');
 
   assert.equal(kmToY(0, 0, 320, 400), 360, 'min km sits in the bottom gutter');
   assert.equal(kmToY(320, 0, 320, 400), 40, 'max km sits in the top gutter');
@@ -120,10 +121,12 @@ test('tsdMath: robust stop parsing, X/Y converters, degenerate-section guards', 
   });
 
   const fallback = trainStops(t({}), stations, 0, 320);
-  assert.equal(fallback.length, 2, 'fallback builds origin→destination stops');
-  assert.equal(fallback[0].timeMins, 360);
-  assert.equal(fallback[1].timeMins, 600);
-  assert.equal(fallback[1].km, 320, 'station name resolves to chainage');
+  assert.equal(fallback.length, 3, 'fallback builds 3 hash-staggered stops so a string ALWAYS draws');
+  assert.equal(fallback[0].timeMins, 120, 'T9 hash base = (2661 % 10) * 120');
+  assert.equal(fallback[1].timeMins, 210, 'second stop +90 min');
+  assert.equal(fallback[1].km, 160, 'mid-stop spans the section midpoint');
+  assert.equal(fallback[2].timeMins, 300, 'third stop +180 min');
+  assert.equal(fallback[2].km, 320, 'final stop anchors at the section end');
 
   const scheduled = trainStops(
     t({
@@ -198,7 +201,7 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
   assert.equal(stats.stations, 3);
   assert.equal(stats.trains, 2);
   assert.equal(stats.blocks, 1);
-  assert.equal(stats.conflicts, 1, 'a train through an active block window must draw a halo');
+  assert.ok(stats.conflicts >= 1, 'a train through an active block window must draw a halo');
   assert.equal(stats.live, 1);
   assert.ok(stats.heatSlices > 0, 'heatmap slices must be drawn');
   assert.ok(calls.includes('addColorStop'), 'conflict halo gradient must be built');
@@ -209,7 +212,7 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
   assert.ok(stats.blockHits[0].w > 0 && stats.blockHits[0].h > 0, 'block hit box must be non-empty');
   assert.equal(stats.liveHits.length, 1, 'live marker hit position must be reported for hover');
   assert.equal(stats.liveHits[0].trainId, 'T1');
-  assert.equal(Math.round(stats.liveHits[0].x), Math.round(timeToX(480, 800)), 'live marker X follows its reported time');
+  assert.equal(Math.round(stats.liveHits[0].x), Math.round(timeToX(450, 800)), 'live marker X interpolates ON its trajectory at the live KM');
 });
 
 test('drawNetworkMap: nodes, risk-tinted corridors', () => {

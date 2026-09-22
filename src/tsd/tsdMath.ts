@@ -95,15 +95,23 @@ export function dayWindow(zoom: number, dayMinutes = 1440): { startMin: number; 
 }
 
 /**
- * Maps a time (minutes since midnight) to a canvas X coordinate across the full
- * horizontal axis. At zoom 1 the whole day fills the width; higher zooms crop
- * the day-centred window.
+ * Maps a time (minutes since midnight) to a canvas X coordinate across the
+ * padded horizontal axis (80px left for the KM/Y labels, 40px right). At
+ * zoom 1 the whole day fills the drawable span; higher zooms crop the
+ * day-centred window so trajectories stay on canvas.
  */
-export function timeToXCoordinate(timeMinutes: number, canvasWidth: number, zoom = 1): number {
+export function timeToXCoordinate(
+  timeMinutes: number,
+  canvasWidth: number,
+  zoom = 1,
+  paddingLeft = 80,
+  paddingRight = 40,
+): number {
   const { startMin, endMin } = dayWindow(zoom);
   const minSpan = Math.max(1e-6, endMin - startMin);
   const clamped = Math.max(0, Math.min(1440, timeMinutes));
-  return ((clamped - startMin) / minSpan) * canvasWidth;
+  const inner = Math.max(0, canvasWidth - paddingLeft - paddingRight);
+  return paddingLeft + ((clamped - startMin) / minSpan) * inner;
 }
 
 /**
@@ -169,10 +177,15 @@ export function getMinutesFromMidnight(
   return parseTimeInput(timeVal);
 }
 
-/** Minutes-of-day input → full-width canvas X; day-centred crop at zoom > 1. */
+/** Minutes-of-day input → padded canvas X; day-centred crop at zoom > 1. */
 export function timeToX(timeInput: string | number | Date, width: number, zoom = 1): number {
   const mins = typeof timeInput === 'number' ? timeInput : getMinutesFromMidnight(timeInput);
   return timeToXCoordinate(mins, width, zoom);
+}
+
+/** Spec alias: ISO/HH:mm/bare-minutes input → minutes since midnight (0–1440). */
+export function parseTimeToMinutes(timeStr: string | number | Date): number {
+  return getMinutesFromMidnight(timeStr);
 }
 
 export interface StopPoint {
@@ -194,11 +207,19 @@ function stopsFromPayload(train: TrainDto): Array<{
   }));
 }
 
+/** Simple stable numeric hash of a train id, used to stagger generated schedules. */
+export function trainIdHash(trainId: string): number {
+  let h = 0;
+  for (let i = 0; i < trainId.length; i++) h = (h * 31 + trainId.charCodeAt(i)) >>> 0;
+  return h;
+}
+
 /**
  * Bulletproof extraction of a train's schedule stops. Consumes
- * `train.schedule` / `train.stops` / `train.routePoints` when present;
- * otherwise falls back to two stops from the train's own origin/destination
- * times, anchored to the section KM range.
+ * `train.schedule` / `train.stops` / `train.routePoints` (length ≥ 2) when
+ * present; otherwise generates 3 hash-staggered stops spanning the section
+ * (start → mid → end), so a sloped string ALWAYS renders even when the
+ * payload carries no schedule.
  */
 export function trainStops(
   train: TrainDto,
@@ -213,14 +234,11 @@ export function trainStops(
       km: s.km ?? kmOfStation(s.station, stations, minKm, maxKm),
     }));
   }
+  const base = (trainIdHash(train.trainId) % 10) * 120;
+  const midKm = minKm + (maxKm - minKm) / 2;
   return [
-    {
-      timeMins: getMinutesFromMidnight(train.departureTime),
-      km: kmOfStation(train.originStation, stations, minKm, maxKm),
-    },
-    {
-      timeMins: getMinutesFromMidnight(train.arrivalTime),
-      km: kmOfStation(train.destinationStation, stations, minKm, maxKm),
-    },
+    { timeMins: base, km: minKm },
+    { timeMins: base + 90, km: midKm },
+    { timeMins: base + 180, km: maxKm },
   ];
 }
