@@ -5,7 +5,9 @@ import { createTelemetrySocket } from './services/socket';
 import { addActivity } from './services/activityLog';
 import { getMinutesFromMidnight } from './tsd/tsdMath';
 import { Header } from './components/Header';
+import { Sidebar } from './components/Sidebar';
 import { HomePage } from './components/HomePage';
+import { AssetHealth } from './components/AssetHealth';
 import { Toasts } from './components/Toasts';
 import { TimeSpaceChart } from './components/TimeSpaceChart';
 import { NetworkMap } from './components/NetworkMap';
@@ -107,60 +109,64 @@ export function App() {
   const assets = payload?.assets ?? [];
 
   return (
-    <div className="flex h-screen flex-col bg-slate-950 text-slate-100">
-      <Header
-        zones={zones}
-        activeDivisionId={activeDivisionId}
-        onSelectDivision={handleSelectDivision}
-        socketConnected={socketConnected}
-        activeView={activeView}
-        onViewChange={setActiveView}
-      />
+    <div className="flex h-screen bg-[#121824] text-[#E0E0E0]">
+      <Sidebar activeView={activeView} onViewChange={setActiveView} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <Header
+          zones={zones}
+          activeDivisionId={activeDivisionId}
+          onSelectDivision={handleSelectDivision}
+          socketConnected={socketConnected}
+          activeView={activeView}
+        />
 
-      {alerts.length > 0 && (
-        <div className="border-b border-slate-800 bg-slate-900 px-5 py-2">
-          {alerts.map((a, i) => (
-            <div key={`${a.timestamp}-${i}`} className="flex items-center gap-2 text-xs">
-              <span className="h-2 w-2 shrink-0 rounded-full bg-rose-500" />
-              <span className="text-rose-300">{a.type}</span>
-              <span className="truncate text-slate-300">{a.message}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <main className="flex min-h-0 flex-1 flex-col gap-4 p-5">
-        {activeView === 'home' ? (
-          <HomePage data={payload} live={live} />
-        ) : activeView === 'optimizer' ? (
-          <OptimizerPanel divisionId={activeDivisionId} onCommitted={handleDataChanged} />
-        ) : activeView === 'disruption' ? (
-          <DisruptionResolver latestAlert={alerts[0] ?? null} onApplied={handleDataChanged} />
-        ) : activeView === 'audit' ? (
-          <AuditLogs />
-        ) : !payload ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
-            Connecting to backend…
+        {alerts.length > 0 && (
+          <div className="border-b border-[#2A3550] bg-[#1E2638] px-5 py-2">
+            {alerts.map((a, i) => (
+              <div key={`${a.timestamp}-${i}`} className="flex items-center gap-2 text-xs">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-[#E53935]" />
+                <span className="text-[#E53935]">{a.type}</span>
+                <span className="truncate text-[#E0E0E0]">{a.message}</span>
+              </div>
+            ))}
           </div>
-        ) : activeView === 'timespace' ? (
-          <TimeSpaceChart
-            startKm={payload.activeSection?.startKm ?? 0}
-            endKm={payload.activeSection?.endKm ?? 100}
-            activeSection={payload.activeSection}
-            stations={payload.stations}
-            trains={payload.trains}
-            blocks={payload.blocks}
-            assets={assets}
-            live={live}
-          />
-        ) : (
-          <NetworkMap
-            zones={zones}
-            activeDivisionId={activeDivisionId}
-            onSelectDivision={handleSelectDivision}
-          />
         )}
-      </main>
+
+        <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
+          {activeView === 'home' ? (
+            <HomePage data={payload} live={live} onLaunch={() => setActiveView('timespace')} />
+          ) : activeView === 'assets' ? (
+            <AssetHealth assets={assets} />
+          ) : activeView === 'optimizer' ? (
+            <OptimizerPanel divisionId={activeDivisionId} onCommitted={handleDataChanged} />
+          ) : activeView === 'disruption' ? (
+            <DisruptionResolver latestAlert={alerts[0] ?? null} onApplied={handleDataChanged} />
+          ) : activeView === 'audit' ? (
+            <AuditLogs />
+          ) : !payload ? (
+            <div className="flex flex-1 items-center justify-center text-sm text-[#9E9E9E]">
+              Connecting to backend…
+            </div>
+          ) : activeView === 'timespace' ? (
+            <TimeSpaceChart
+              startKm={payload.activeSection?.startKm ?? 0}
+              endKm={payload.activeSection?.endKm ?? 100}
+              activeSection={payload.activeSection}
+              stations={payload.stations}
+              trains={payload.trains}
+              blocks={payload.blocks}
+              assets={assets}
+              live={live}
+            />
+          ) : (
+            <NetworkMap
+              zones={zones}
+              activeDivisionId={activeDivisionId}
+              onSelectDivision={handleSelectDivision}
+            />
+          )}
+        </main>
+      </div>
 
       <Toasts />
     </div>

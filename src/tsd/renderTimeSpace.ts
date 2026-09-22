@@ -25,6 +25,8 @@ export interface TimeSpaceRenderOptions {
   zoom: number;
   showHeatmap: boolean;
   showBlocks: boolean;
+  /** Draw only conflict halos, hiding trajectory strings. */
+  conflictsOnly: boolean;
   /** cursor position on the day axis, minutes since midnight. */
   cursorMin: number;
 }
@@ -61,9 +63,9 @@ const HEAT_SLICES = 40;
 /** Chainage gap below which a live marker sits on a station line and its label must flip below it. */
 const LABEL_FLIP_KM = 12;
 
-/** Java Swing palette: freight in blue, express in yellow. */
+/** Desktop palette: high-priority express in blue, freight/local in amber. */
 const colorOf = (train: TrainDto) =>
-  train.type === 'FREIGHT' || train.priority >= 3 ? '#38bdf8' : '#eab308';
+  train.type === 'FREIGHT' || train.priority >= 3 ? '#FFC107' : '#2196F3';
 
 /** A maintenance block window in (time, km) axes, km normalized low→high. */
 interface BlockWindow {
@@ -228,6 +230,7 @@ export function drawTimeSpace(
   for (const { train, points } of polylines) {
     if (points.length < 2) continue;
     if (!points.some((p) => scale.inView(p.timeMins))) continue;
+    if (opts.conflictsOnly) continue;
     ctx.strokeStyle = colorOf(train);
     ctx.lineWidth = 2.5;
     ctx.beginPath();
@@ -257,13 +260,13 @@ export function drawTimeSpace(
           const cx = xOf(hit.x);
           const cy = yOf(hit.y);
           const gradient = ctx.createRadialGradient(cx, cy, 1, cx, cy, ringRadius + 12);
-          gradient.addColorStop(0, 'rgba(239, 68, 68, 0.9)');
-          gradient.addColorStop(1, 'rgba(239, 68, 68, 0)');
+          gradient.addColorStop(0, 'rgba(229, 57, 53, 0.9)');
+          gradient.addColorStop(1, 'rgba(229, 57, 53, 0)');
           ctx.fillStyle = gradient;
           ctx.beginPath();
           ctx.arc(cx, cy, ringRadius + 12, 0, Math.PI * 2);
           ctx.fill();
-          ctx.strokeStyle = '#ef4444';
+          ctx.strokeStyle = '#E53935';
           ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);

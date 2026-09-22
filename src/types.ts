@@ -118,7 +118,7 @@ export interface DisruptionAlert {
   riskScore?: number;
 }
 
-export type ViewId = 'home' | 'timespace' | 'network' | 'optimizer' | 'disruption' | 'audit';
+export type ViewId = 'home' | 'assets' | 'timespace' | 'network' | 'optimizer' | 'disruption' | 'audit';
 
 // --- Milestone 6: RBAC + activity ticker -----------------------------------
 

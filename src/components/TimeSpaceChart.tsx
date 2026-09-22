@@ -21,6 +21,15 @@ function hhmm(mins: number): string {
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 }
 
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="flex items-center gap-1 text-[10px] text-[#9E9E9E]">
+      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+      {label}
+    </span>
+  );
+}
+
 export function TimeSpaceChart({
   startKm,
   endKm,
@@ -40,6 +49,7 @@ export function TimeSpaceChart({
   const [zoom, setZoom] = useState(1);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [showBlocks, setShowBlocks] = useState(true);
+  const [conflictsOnly, setConflictsOnly] = useState(false);
   const [hover, setHover] = useState<HoverItem | null>(null);
   const [mouse, setMouse] = useState<{ x: number; y: number } | null>(null);
 
@@ -72,6 +82,7 @@ export function TimeSpaceChart({
         zoom,
         showHeatmap,
         showBlocks,
+        conflictsOnly,
         cursorMin: getMinutesFromMidnight(new Date()),
       });
       hitsRef.current = { blocks: stats.blockHits, live: stats.liveHits };
@@ -85,7 +96,7 @@ export function TimeSpaceChart({
       window.clearInterval(timer);
       observer.disconnect();
     };
-  }, [startKm, endKm, stations, trains, blocks, assets, zoom, showHeatmap, showBlocks, activeSection]);
+  }, [startKm, endKm, stations, trains, blocks, assets, zoom, showHeatmap, showBlocks, conflictsOnly, activeSection]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -184,8 +195,11 @@ export function TimeSpaceChart({
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-4 text-xs text-slate-300">
-        <label className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-4 text-xs text-[#E0E0E0]">
+        <span className="text-[13px] font-semibold text-[#E0E0E0]">
+          Interactive Time-Space String Diagram (COA / TMS View)
+        </span>
+        <label className="flex items-center gap-2 text-[#9E9E9E]">
           Zoom
           <input
             type="range"
@@ -194,28 +208,45 @@ export function TimeSpaceChart({
             step={0.1}
             value={zoom}
             onChange={(e) => setZoom(Number(e.target.value))}
-            className="w-36 accent-sky-500"
+            className="w-36 accent-[#2196F3]"
           />
-          <span className="tabular-nums text-slate-400">{zoom.toFixed(1)}×</span>
+          <span className="tabular-nums text-[#9E9E9E]">{zoom.toFixed(1)}×</span>
         </label>
+        <span className="h-6 w-px bg-[#2A3550]" />
         <label className="flex cursor-pointer items-center gap-1.5">
           <input
             type="checkbox"
             checked={showHeatmap}
             onChange={(e) => setShowHeatmap(e.target.checked)}
-            className="accent-sky-500"
+            className="accent-[#2196F3]"
           />
-          Show Heatmap
+          Show Risk Heatmap Overlay
         </label>
         <label className="flex cursor-pointer items-center gap-1.5">
           <input
             type="checkbox"
             checked={showBlocks}
             onChange={(e) => setShowBlocks(e.target.checked)}
-            className="accent-sky-500"
+            className="accent-[#2196F3]"
           />
           Show Maintenance Blocks
         </label>
+        <label className="flex cursor-pointer items-center gap-1.5">
+          <input
+            type="checkbox"
+            checked={conflictsOnly}
+            onChange={(e) => setConflictsOnly(e.target.checked)}
+            className="accent-[#2196F3]"
+          />
+          Highlight Conflicts Only
+        </label>
+        <span className="h-6 w-px bg-[#2A3550]" />
+        <div className="flex items-center gap-4">
+          <LegendDot color="#2196F3" label="High-Priority Express" />
+          <LegendDot color="#FFC107" label="Freight / Local" />
+          <LegendDot color="#4CAF50" label="Active Block" />
+          <LegendDot color="#E53935" label="Conflict Point" />
+        </div>
       </div>
       <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-800 bg-slate-950">
         <canvas

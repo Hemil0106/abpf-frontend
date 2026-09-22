@@ -191,6 +191,7 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
     zoom: 1,
     showHeatmap: true,
     showBlocks: true,
+    conflictsOnly: false,
     cursorMin: 480,
   });
 
