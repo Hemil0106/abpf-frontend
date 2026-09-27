@@ -208,7 +208,7 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
     blocks,
     assets,
     live: { T1: { km: 160, mins: 480, speedKmh: 65 } },
-    disruptions: [{ id: 'D1', km: 180, startMins: 360, endMins: 520 }],
+    disruptions: [{ id: 'D1', km: 160, startMins: 360, endMins: 520 }],
     zoom: 1,
     showHeatmap: true,
     showBlocks: true,
@@ -221,11 +221,19 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
   assert.equal(stats.blocks, 1);
   assert.ok(stats.conflicts >= 1, 'a train through an active block window must draw a halo');
   assert.equal(stats.live, 1);
-  assert.equal(stats.disruptionHits.length, 1, 'disruption badge must be reported for click');
-  assert.equal(Math.round(stats.disruptionHits[0].x), Math.round(timeToX(360, 800)), 'badge pins to the window start');
-  assert.equal(Math.round(stats.disruptionHits[0].y), Math.round(kmToY(180, 0, 320, 400)), 'badge pins to the asset chainage');
-  assert.ok(stats.heatSlices > 0, 'risk overlay dots must be drawn');
-  assert.ok(calls.includes('arc'), 'conflict halos and risk dots must draw ovals');
+  assert.equal(stats.disruptionHits.length, 2, 'badges pinned where both trajectories intersect the window');
+  assert.ok(
+    stats.disruptionHits.every((h) => h.x >= timeToX(360, 800) && h.x <= timeToX(520, 800)),
+    'intersection X must sit inside the window hours',
+  );
+  const yHi = kmToY(163, 0, 320, 400, 40, 70);
+  const yLo = kmToY(157, 0, 320, 400, 40, 70);
+  assert.ok(
+    stats.disruptionHits.every((h) => h.y >= yHi && h.y <= yLo),
+    'intersection Y must sit inside the km±3 corridor',
+  );
+  assert.ok(stats.heatSlices > 0, 'risk overlay bands must be drawn');
+  assert.ok(calls.includes('arc'), 'conflict halos and disruption badges must draw ovals');
   assert.ok(calls.includes('setLineDash'), 'dashed station lines must be drawn');
   assert.ok(calls.includes('roundRect'), 'rounded block + train-label pills must be drawn');
 
@@ -236,10 +244,12 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
   assert.equal(stats.liveHits[0].trainId, 'T1');
   assert.equal(Math.round(stats.liveHits[0].x), Math.round(timeToX(480, 800)), 'live marker pins to the current-time column');
 
-  assert.equal(stats.zoneHits.length, 1, 'risk dot must be reported for click inspection');
+  assert.equal(stats.zoneHits.length, 1, 'risk band must be reported for click inspection');
   assert.equal(stats.zoneHits[0].assetId, 'A1');
-  assert.equal(Math.round(stats.zoneHits[0].x), 80 - 4, 'risk dot pins to the left gutter');
-  assert.equal(Math.round(stats.zoneHits[0].y), Math.round(kmToY(100, 0, 320, 400)), 'risk dot sits at the asset chainage height');
+  assert.equal(stats.zoneHits[0].x, 80, 'band spans the full drawable width');
+  assert.equal(stats.zoneHits[0].w, 800 - 80 - 40, 'band width covers the plot');
+  assert.equal(stats.zoneHits[0].h, 16, 'band is 16px tall');
+  assert.equal(Math.round(stats.zoneHits[0].y), Math.round(kmToY(100, 0, 320, 400, 40, 70) - 8), 'band centres on the asset chainage');
 });
 
 test('drawNetworkMap: nodes, risk-tinted corridors', () => {

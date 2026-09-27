@@ -56,11 +56,13 @@ export interface LiveHit {
   y: number;
 }
 
-/** Critical asset-zone warning badge position, in CSS pixels (for hit testing). */
+/** Critical asset-zone warning band rect, in CSS pixels (for hit testing). */
 export interface ZoneHit {
   assetId: string;
   x: number;
   y: number;
+  w: number;
+  h: number;
 }
 
 /** Disruption warning badge position, in CSS pixels (for click hit testing). */
@@ -83,10 +85,9 @@ export interface RenderStats {
   disruptionHits: DisruptionHit[];
 }
 
-// Risk-dot + conflict palette (desktop mirror): amber freight/local strings
+// Risk-band + conflict palette (desktop mirror): amber freight/local strings
 // and emerald/red accents from ThemeConstants.
 const ACCENT_AMBER = '#FFC107';
-const ACCENT_GREEN = '#4CAF50';
 const ACCENT_RED = '#E53935';
 const GRID_MAJOR = '#2A3550';
 const GRID_MINOR = '#1E2638';
@@ -103,22 +104,25 @@ const DOWN_YELLOW = '#eab308';
 
 const LEFT_PAD = 80;
 const TOP_PAD = 40;
-const BOTTOM_PAD = 65;
+const BOTTOM_PAD = 70;
 const RIGHT_PAD = 40;
 
 /** Train string color (dual lane): high priority → bright sky blue, else yellow. */
 const colorOf = (train: TrainDto) => (train.priority <= 2 ? UP_BLUE : DOWN_YELLOW);
 
-/** Lane direction from the stop polyline: +1 = UP (ascending KM), -1 = DOWN. */
-const laneOf = (points: { km: number }[]): number =>
-  points.length < 2 || points[points.length - 1].km >= points[0].km ? 1 : -1;
+/**
+ * Lane direction: an explicit `train.direction` wins when the payload carries
+ * one; otherwise the stop polyline decides — UP (Dadar→Thane→Kalyan) runs
+ * 0 KM → 60 KM ascending, DOWN (Kalyan→Thane→Dadar) runs top → 0 KM.
+ */
+const laneOf = (train: TrainDto, points: { km: number }[]): number => {
+  if (train.direction === 'DOWN') return -1;
+  if (train.direction === 'UP') return 1;
+  return points.length < 2 || points[points.length - 1].km >= points[0].km ? 1 : -1;
+};
 
 /** Maintenance-block window tint: high-priority possession → amber, else green. */
 const blockColor = (block: BlockDto) => (block.blockPriority >= 3 ? BLOCK_AMBER : BLOCK_GREEN);
-
-/** Desktop risk dot color bands: <0.35 green, ≤0.60 amber, else red. */
-const riskDotColor = (risk: number) =>
-  risk < 0.35 ? ACCENT_GREEN : risk <= 0.6 ? ACCENT_AMBER : ACCENT_RED;
 
 /** A maintenance block window in (time, km) axes, km normalized low→high. */
 interface BlockWindow {
@@ -183,7 +187,7 @@ export function drawTimeSpace(
   const kmOf = (name: string | null) => kmOfStation(name, opts.stations, minKm, maxKm);
   const scale = buildDayScale({ height, startKm: minKm, endKm: maxKm, zoom: opts.zoom });
   const xOf = (min: number) => timeToX(min, width, opts.zoom);
-  const yOf = (km: number) => kmToY(km, minKm, maxKm, height);
+  const yOf = (km: number) => kmToY(km, minKm, maxKm, height, TOP_PAD, BOTTOM_PAD);
 
   const stats: RenderStats = {
     stations: 0,
@@ -230,10 +234,6 @@ export function drawTimeSpace(
     ctx.moveTo(gx, TOP_PAD);
     ctx.lineTo(gx, TOP_PAD + plotH);
     ctx.stroke();
-    if (isHour) {
-      ctx.fillStyle = '#94a3b8';
-      ctx.fillText(`${String(min / 60).padStart(2, '0')}:00`, gx - 14, TOP_PAD + plotH + 16);
-    }
   }
   ctx.setLineDash([4, 4]);
   ctx.strokeStyle = STATION_LINE;
@@ -251,6 +251,13 @@ export function drawTimeSpace(
   ctx.strokeStyle = GRID_MAJOR;
   ctx.lineWidth = 1;
   ctx.strokeRect(LEFT_PAD, TOP_PAD, plotW, plotH);
+  // Explicit 24-hour day ticks (00:00 → 24:00) sitting in the bottom gutter
+  // just above the horizontal scrollbar — the canvas bottoms out at BOTTOM_PAD
+  // so the labels are never clipped by the scrolling container.
+  ctx.fillStyle = '#94a3b8';
+  for (let min = 0; min <= 1440; min += 180) {
+    ctx.fillText(`${String(min / 60).padStart(2, '0')}:00`, xOf(min) - 12, height - 25);
+  }
   ctx.restore();
 
   // Active maintenance block windows (green), used later for conflict detection.
@@ -291,21 +298,18 @@ export function drawTimeSpace(
     }
   }
 
-  // Risk Overlay (desktop mirror): coloured dots in the left gutter at each
-  // asset's chainage, radius scaled by failureRiskScore. Each dot is a click
-  // target for the inspector.
+  // Risk Overlay (desktop mirror): a subtle translucent horizontal warning band
+  // at each critical asset's chainage spanning the full drawable width — no
+  // floating gutter dots, so the band reads as a risk corridor the trains run
+  // through. Each band is a click target for the inspector.
   if (opts.showHeatmap) {
     for (const asset of opts.assets) {
       if (asset.locationKm < minKm || asset.locationKm > maxKm) continue;
       const y = yOf(asset.locationKm);
-      const x = LEFT_PAD - 4;
-      const r = 2 + asset.failureRiskScore * 6;
-      ctx.fillStyle = hexA(riskDotColor(asset.failureRiskScore), 120 / 255);
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
+      ctx.fillRect(LEFT_PAD, y - 8, plotW, 16);
       stats.heatSlices += 1;
-      stats.zoneHits.push({ assetId: asset.assetId, x, y });
+      stats.zoneHits.push({ assetId: asset.assetId, x: LEFT_PAD, y: y - 8, w: plotW, h: 16 });
     }
   }
 
@@ -325,11 +329,11 @@ export function drawTimeSpace(
     if (points.length < 2) continue;
     if (!points.some((p) => scale.inView(p.timeMins))) continue;
     const color = colorOf(train);
-    const down = laneOf(points) < 0;
+    const down = laneOf(train, points) < 0;
     const dim = opts.conflictsOnly && !(conflicted.get(train.trainId) ?? false);
     if (dim) {
       ctx.save();
-      if (down) ctx.setLineDash([8, 6]);
+      if (down) ctx.setLineDash([6, 4]);
       ctx.strokeStyle = hexA(color, 30 / 255);
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -345,7 +349,7 @@ export function drawTimeSpace(
       continue;
     }
     ctx.save();
-    if (down) ctx.setLineDash([8, 6]);
+    if (down) ctx.setLineDash([6, 4]);
     ctx.strokeStyle = hexA(color, 35 / 255);
     ctx.lineWidth = 7;
     ctx.beginPath();
@@ -410,52 +414,55 @@ export function drawTimeSpace(
     }
   }
 
-  // Disruption / problem locations (spec): a pulsing red warning badge — glow
-  // ring + exclamation mark — pinned to the asset's exact station KM at the
-  // start of its time window, with a dashed underline across the window hours.
+  // Disruption / problem locations (spec): the badge is pinned EXACTLY where a
+  // train trajectory intersects the disruption's operating window (startMins..
+  // endMins × km±3), so it rides on the line instead of floating unanchored.
+  // No dashed underline — the glowing red exclamation badge is the marker.
   for (const d of opts.disruptions ?? []) {
-    if (d.km < minKm || d.km > maxKm) continue;
-    const x0 = xOf(d.startMins);
-    const x1 = xOf(d.endMins);
-    const y = yOf(d.km);
+    const win: BlockWindow = {
+      startMin: d.startMins,
+      endMin: d.endMins,
+      startKm: d.km - 3,
+      endKm: d.km + 3,
+    };
     const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 240 + d.id.length * 0.7);
-    ctx.save();
-    ctx.strokeStyle = hexA(DISRUPTION_RED, 180 / 255);
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(x0, y);
-    ctx.lineTo(Math.max(x0 + 16, x1), y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.shadowColor = DISRUPTION_RED;
-    ctx.shadowBlur = 14;
-    ctx.strokeStyle = DISRUPTION_RED;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(x0, y, 8 + pulse * 4, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = hexA(DISRUPTION_RED, 55 / 255);
-    ctx.beginPath();
-    ctx.arc(x0, y, 7 + pulse * 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = DISRUPTION_RED;
-    ctx.beginPath();
-    ctx.arc(x0, y, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(x0, y, 5, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 9px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('!', x0, y + 0.5);
-    ctx.restore();
-    stats.disruptionHits.push({ disruptionId: d.id, x: x0, y });
+    for (const { points } of polylines) {
+      for (const seg of segmentsOf(points.map((p) => ({ x1: p.timeMins, y1: p.km })))) {
+        const hit = segmentRectHit(seg, win);
+        if (!hit || !scale.inView(hit.x)) continue;
+        const cx = xOf(hit.x);
+        const cy = yOf(hit.y);
+        ctx.save();
+        ctx.shadowColor = DISRUPTION_RED;
+        ctx.shadowBlur = 14;
+        ctx.strokeStyle = DISRUPTION_RED;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 8 + pulse * 4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = hexA(DISRUPTION_RED, 55 / 255);
+        ctx.beginPath();
+        ctx.arc(cx, cy, 7 + pulse * 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = DISRUPTION_RED;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 9px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('!', cx, cy + 0.5);
+        ctx.restore();
+        stats.disruptionHits.push({ disruptionId: d.id, x: cx, y: cy });
+      }
+    }
   }
 
   // Live train markers: glowing amber dot pinned to each train's own sloped

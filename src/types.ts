@@ -42,6 +42,8 @@ export interface TrainDto {
   loopLineRequirement: boolean;
   // Milestone 6: a richer payload may carry a typed train and a stop schedule.
   type?: 'FREIGHT' | 'EXPRESS' | 'PASSENGER';
+  /** Optional explicit lane: wins over the stop-polyline slope when present. */
+  direction?: 'UP' | 'DOWN';
   schedule?: TrainStop[];
   stops?: TrainStop[];
   routePoints?: TrainStop[];

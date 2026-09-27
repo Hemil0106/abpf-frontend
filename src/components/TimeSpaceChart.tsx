@@ -321,9 +321,9 @@ export function TimeSpaceChart({
           x,
           y,
           timeToX(a.timeMins, width, zoom),
-          kmToY(a.km, startKm, endKm, 650),
+          kmToY(a.km, startKm, endKm, 650, 40, 70),
           timeToX(b.timeMins, width, zoom),
-          kmToY(b.km, startKm, endKm, 650),
+          kmToY(b.km, startKm, endKm, 650, 40, 70),
         );
         if (dist <= 10) return { type: 'train', id: trainId };
       }
@@ -335,7 +335,7 @@ export function TimeSpaceChart({
       if (Math.hypot(x - d.x, y - d.y) <= 12) return { type: 'disruption', id: d.disruptionId };
     }
     for (const z of zones) {
-      if (Math.hypot(x - z.x, y - z.y) <= 14) return { type: 'zone', id: z.assetId };
+      if (x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h) return { type: 'zone', id: z.assetId };
     }
     return null;
   };
@@ -501,7 +501,7 @@ export function TimeSpaceChart({
       </div>
       <div
         ref={wrapRef}
-        className="relative min-h-0 flex-1 overflow-x-auto overflow-y-hidden rounded-lg border border-slate-800 bg-slate-950 pb-4"
+        className="relative min-h-0 flex-1 overflow-auto rounded-lg border border-slate-800 bg-slate-950 pb-6"
       >
         <canvas
           ref={canvasRef}
