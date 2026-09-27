@@ -21,6 +21,8 @@ export interface TimeSpaceRenderOptions {
   assets: readonly AssetDto[];
   /** live trainId → current position snapshot from the telemetry feed. */
   live: Readonly<Record<string, TrainLive>>;
+  /** disruption / problem locations: badge drawn at asset km + operating window. */
+  disruptions?: readonly DisruptionDot[];
   zoom: number;
   showHeatmap: boolean;
   showBlocks: boolean;
@@ -28,6 +30,14 @@ export interface TimeSpaceRenderOptions {
   conflictsOnly: boolean;
   /** cursor position on the day axis, minutes since midnight. */
   cursorMin: number;
+}
+
+/** A disruption / problem location: fixed chainage and active time window. */
+export interface DisruptionDot {
+  id: string;
+  km: number;
+  startMins: number;
+  endMins: number;
 }
 
 /** Maintenance block window bounding box, in CSS pixels (for hit testing). */
@@ -53,6 +63,13 @@ export interface ZoneHit {
   y: number;
 }
 
+/** Disruption warning badge position, in CSS pixels (for click hit testing). */
+export interface DisruptionHit {
+  disruptionId: string;
+  x: number;
+  y: number;
+}
+
 export interface RenderStats {
   stations: number;
   trains: number;
@@ -63,6 +80,7 @@ export interface RenderStats {
   blockHits: BlockHit[];
   liveHits: LiveHit[];
   zoneHits: ZoneHit[];
+  disruptionHits: DisruptionHit[];
 }
 
 // Desktop palette mirror (ThemeConstants + TimeSpaceCanvas grid/risk colors):
@@ -74,6 +92,9 @@ const ACCENT_RED = '#E53935';
 const GRID_MAJOR = '#2A3550';
 const GRID_MINOR = '#1E2638';
 const STATION_LINE = '#3A4560';
+const BLOCK_GREEN = '#22c55e';
+const BLOCK_AMBER = '#f59e0b';
+const DISRUPTION_RED = '#ef4444';
 
 const LEFT_PAD = 80;
 const TOP_PAD = 40;
@@ -83,9 +104,8 @@ const RIGHT_PAD = 40;
 /** Train string color: high priority → blue, rest → amber (desktop mirror). */
 const colorOf = (train: TrainDto) => (train.priority <= 2 ? ACCENT_BLUE : ACCENT_AMBER);
 
-/** Maintenance-block priority → accent color: p≥3 red, p≥2 amber, else green. */
-const blockColor = (block: BlockDto) =>
-  block.blockPriority >= 3 ? ACCENT_RED : block.blockPriority >= 2 ? ACCENT_AMBER : ACCENT_GREEN;
+/** Maintenance-block window tint: high-priority possession → amber, else green. */
+const blockColor = (block: BlockDto) => (block.blockPriority >= 3 ? BLOCK_AMBER : BLOCK_GREEN);
 
 /** Desktop risk dot color bands: <0.35 green, ≤0.60 amber, else red. */
 const riskDotColor = (risk: number) =>
@@ -166,6 +186,7 @@ export function drawTimeSpace(
     blockHits: [],
     liveHits: [],
     zoneHits: [],
+    disruptionHits: [],
   };
 
   ctx.font = '11px ui-monospace, monospace';
@@ -242,13 +263,17 @@ export function drawTimeSpace(
       const bw = Math.max(2, x2 - x1);
       const bh = Math.abs(y2 - y1);
       const base = blockColor(block);
-      ctx.fillStyle = hexA(base, 0.16);
+      ctx.save();
+      ctx.shadowColor = base;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = hexA(base, 0.14);
       ctx.strokeStyle = hexA(base, 0.7);
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.roundRect(bx, by, bw, bh, 10);
       ctx.fill();
       ctx.stroke();
+      ctx.restore();
       ctx.fillStyle = '#FFFFFF';
       ctx.font = 'bold 10px monospace';
       ctx.fillText(block.blockId, bx + 8, by + 16);
@@ -369,10 +394,59 @@ export function drawTimeSpace(
     }
   }
 
+  // Disruption / problem locations (spec): a pulsing red warning badge — glow
+  // ring + exclamation mark — pinned to the asset's exact station KM at the
+  // start of its time window, with a dashed underline across the window hours.
+  for (const d of opts.disruptions ?? []) {
+    if (d.km < minKm || d.km > maxKm) continue;
+    const x0 = xOf(d.startMins);
+    const x1 = xOf(d.endMins);
+    const y = yOf(d.km);
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 240 + d.id.length * 0.7);
+    ctx.save();
+    ctx.strokeStyle = hexA(DISRUPTION_RED, 180 / 255);
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x0, y);
+    ctx.lineTo(Math.max(x0 + 16, x1), y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.shadowColor = DISRUPTION_RED;
+    ctx.shadowBlur = 14;
+    ctx.strokeStyle = DISRUPTION_RED;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(x0, y, 8 + pulse * 4, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = hexA(DISRUPTION_RED, 55 / 255);
+    ctx.beginPath();
+    ctx.arc(x0, y, 7 + pulse * 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = DISRUPTION_RED;
+    ctx.beginPath();
+    ctx.arc(x0, y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x0, y, 5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('!', x0, y + 0.5);
+    ctx.restore();
+    stats.disruptionHits.push({ disruptionId: d.id, x: x0, y });
+  }
+
   // Live train markers: glowing amber dot pinned to each train's own sloped
   // trajectory — X follows the interpolated schedule time (pos.mins), Y the
   // matching chainage — never the wall-clock column. The id label rides in a
-  // small dark badge offset (+8, -4) so it clears nearby station marks.
+  // small dark pill offset (+8, -4); markers near the bottom origin flip the
+  // pill ABOVE the marker so the label never covers the X-axis tick labels.
   for (const [trainId, pos] of Object.entries(opts.live)) {
     if (pos.km < minKm || pos.km > maxKm) continue;
     const mx = xOf(pos.mins ?? opts.cursorMin);
@@ -390,15 +464,16 @@ export function drawTimeSpace(
     ctx.beginPath();
     ctx.arc(mx, my, 5, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.font = '9px monospace';
+    const nearBottom = my > yOf(minKm) - 14;
     const label = trainId;
+    ctx.font = '9px monospace';
     const textW = ctx.measureText(label).width;
     ctx.fillStyle = 'rgba(25, 33, 48, 0.86)';
     ctx.beginPath();
-    ctx.roundRect(mx + 8 - 3, my - 4 - 9, textW + 6, 12, 6);
+    ctx.roundRect(mx + 8 - 3, nearBottom ? my - 30 : my - 13, textW + 6, 12, 6);
     ctx.fill();
     ctx.fillStyle = '#FFFFFF';
-    ctx.fillText(label, mx + 8, my - 4);
+    ctx.fillText(label, mx + 8, nearBottom ? my - 18 : my - 4);
     stats.live += 1;
     stats.liveHits.push({ trainId, x: mx, y: my });
   }

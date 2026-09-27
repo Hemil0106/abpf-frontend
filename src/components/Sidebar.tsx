@@ -21,22 +21,24 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
 
   return (
     <aside
-      className={`flex shrink-0 flex-col border-r border-[#2A3550] bg-[#1E2638] transition-[width] duration-150 ${
+      className={`flex shrink-0 flex-col border-r border-slate-800/60 bg-slate-950/90 backdrop-blur-2xl transition-[width] duration-150 ${
         expanded ? 'w-60' : 'w-[60px]'
       }`}
     >
-      <div className="flex items-center justify-between gap-2 border-b border-[#2A3550] px-2.5 py-2.5">
-        <span className="flex h-7 items-center rounded bg-[#2196F3] px-2 text-sm font-bold text-white">AB</span>
+      <div className="flex items-center justify-between gap-2 border-b border-slate-800/60 px-2.5 py-2.5">
+        <span className="flex h-7 items-center rounded-lg bg-gradient-to-r from-cyan-400 to-blue-500 px-2 text-sm font-bold text-slate-950">
+          AB
+        </span>
         <button
           onClick={() => setExpanded(!expanded)}
           title={expanded ? 'Collapse' : 'Expand'}
-          className="px-1 text-[#9E9E9E] transition-colors hover:text-white"
+          className="px-1 text-slate-500 transition-colors hover:text-white"
         >
           {expanded ? '«' : '»'}
         </button>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-0 overflow-y-auto py-2">
+      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto py-2">
         {NAV_ITEMS.map((item) => {
           const active = item.id === activeView;
           return (
@@ -44,11 +46,13 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
               key={item.id}
               onClick={() => onViewChange(item.id)}
               title={expanded ? undefined : item.label}
-              className={`flex h-10 items-center gap-2 transition-colors ${
-                active ? 'border-l-[3px] border-[#2196F3] bg-[#23335C] text-white' : 'border-l-[3px] border-transparent bg-[#121824] text-[#E0E0E0] hover:bg-[#212B40]'
-              } ${expanded ? 'px-3' : 'justify-center px-0'}`}
+              className={`flex items-center gap-2 rounded-xl px-3 py-2 transition-all ${
+                active
+                  ? 'border-l-4 border-cyan-400 bg-gradient-to-r from-cyan-500/15 to-transparent font-semibold text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
+                  : 'ml-0 border-l-4 border-transparent text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+              } ${expanded ? 'mx-2' : 'justify-center px-0'}`}
             >
-              <span className={`shrink-0 px-1 text-[11px] font-medium ${active ? 'text-[#2196F3]' : 'text-[#9E9E9E]'}`}>
+              <span className={`shrink-0 px-0.5 text-[11px] font-medium ${active ? 'text-cyan-300' : 'text-slate-500'}`}>
                 {item.glyph}
               </span>
               {expanded && <span className="truncate text-xs">{item.label}</span>}

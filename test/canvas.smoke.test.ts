@@ -208,6 +208,7 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
     blocks,
     assets,
     live: { T1: { km: 160, mins: 480, speedKmh: 65 } },
+    disruptions: [{ id: 'D1', km: 180, startMins: 360, endMins: 520 }],
     zoom: 1,
     showHeatmap: true,
     showBlocks: true,
@@ -220,6 +221,9 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
   assert.equal(stats.blocks, 1);
   assert.ok(stats.conflicts >= 1, 'a train through an active block window must draw a halo');
   assert.equal(stats.live, 1);
+  assert.equal(stats.disruptionHits.length, 1, 'disruption badge must be reported for click');
+  assert.equal(Math.round(stats.disruptionHits[0].x), Math.round(timeToX(360, 800)), 'badge pins to the window start');
+  assert.equal(Math.round(stats.disruptionHits[0].y), Math.round(kmToY(180, 0, 320, 400)), 'badge pins to the asset chainage');
   assert.ok(stats.heatSlices > 0, 'risk overlay dots must be drawn');
   assert.ok(calls.includes('arc'), 'conflict halos and risk dots must draw ovals');
   assert.ok(calls.includes('setLineDash'), 'dashed station lines must be drawn');
