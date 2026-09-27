@@ -83,9 +83,8 @@ export interface RenderStats {
   disruptionHits: DisruptionHit[];
 }
 
-// Desktop palette mirror (ThemeConstants + TimeSpaceCanvas grid/risk colors):
-// priority ≤ 2 = ACCENT_BLUE (Express), else ACCENT_AMBER (Freight/Local).
-const ACCENT_BLUE = '#2196F3';
+// Risk-dot + conflict palette (desktop mirror): amber freight/local strings
+// and emerald/red accents from ThemeConstants.
 const ACCENT_AMBER = '#FFC107';
 const ACCENT_GREEN = '#4CAF50';
 const ACCENT_RED = '#E53935';
@@ -96,13 +95,23 @@ const BLOCK_GREEN = '#22c55e';
 const BLOCK_AMBER = '#f59e0b';
 const DISRUPTION_RED = '#ef4444';
 
+// Dual-line lane palette: UP lane (ascending chainage) drawn solid in bright
+// sky blue for high-priority trains and yellow for the rest; DOWN lane
+// (descending chainage) drawn dashed for instant operational recognition.
+const UP_BLUE = '#38bdf8';
+const DOWN_YELLOW = '#eab308';
+
 const LEFT_PAD = 80;
 const TOP_PAD = 40;
 const BOTTOM_PAD = 65;
 const RIGHT_PAD = 40;
 
-/** Train string color: high priority → blue, rest → amber (desktop mirror). */
-const colorOf = (train: TrainDto) => (train.priority <= 2 ? ACCENT_BLUE : ACCENT_AMBER);
+/** Train string color (dual lane): high priority → bright sky blue, else yellow. */
+const colorOf = (train: TrainDto) => (train.priority <= 2 ? UP_BLUE : DOWN_YELLOW);
+
+/** Lane direction from the stop polyline: +1 = UP (ascending KM), -1 = DOWN. */
+const laneOf = (points: { km: number }[]): number =>
+  points.length < 2 || points[points.length - 1].km >= points[0].km ? 1 : -1;
 
 /** Maintenance-block window tint: high-priority possession → amber, else green. */
 const blockColor = (block: BlockDto) => (block.blockPriority >= 3 ? BLOCK_AMBER : BLOCK_GREEN);
@@ -316,8 +325,11 @@ export function drawTimeSpace(
     if (points.length < 2) continue;
     if (!points.some((p) => scale.inView(p.timeMins))) continue;
     const color = colorOf(train);
+    const down = laneOf(points) < 0;
     const dim = opts.conflictsOnly && !(conflicted.get(train.trainId) ?? false);
     if (dim) {
+      ctx.save();
+      if (down) ctx.setLineDash([8, 6]);
       ctx.strokeStyle = hexA(color, 30 / 255);
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -328,9 +340,12 @@ export function drawTimeSpace(
         else ctx.lineTo(px, py);
       });
       ctx.stroke();
+      ctx.restore();
       stats.trains += 1;
       continue;
     }
+    ctx.save();
+    if (down) ctx.setLineDash([8, 6]);
     ctx.strokeStyle = hexA(color, 35 / 255);
     ctx.lineWidth = 7;
     ctx.beginPath();
@@ -344,11 +359,12 @@ export function drawTimeSpace(
     ctx.strokeStyle = color;
     ctx.lineWidth = 2.5;
     ctx.stroke();
+    ctx.restore();
     const first = points[0];
     const last = points[points.length - 1];
     const midX = (xOf(first.timeMins) + xOf(last.timeMins)) / 2;
     const midY = (yOf(first.km) + yOf(last.km)) / 2;
-    const label = train.trainId;
+    const label = down ? `${train.trainId} ▾` : `${train.trainId} ▴`;
     ctx.font = '9px monospace';
     const textW = ctx.measureText(label).width;
     ctx.fillStyle = 'rgba(25, 33, 48, 0.86)';

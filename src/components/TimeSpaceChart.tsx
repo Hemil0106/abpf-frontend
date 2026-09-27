@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AssetDto, BlockDto, DisruptionKind, SectionDto, StationDto, TrainDto, TrainLive } from '../types';
+import type { AssetDto, BlockDto, DisruptionKind, PendingDisruptionRef, SectionDto, StationDto, TrainDto, TrainLive } from '../types';
 import {
   drawTimeSpace,
   type BlockHit,
@@ -19,6 +19,8 @@ interface TimeSpaceChartProps {
   blocks: readonly BlockDto[];
   assets: readonly AssetDto[];
   live: Readonly<Record<string, TrainLive>>;
+  /** Fired by the inspector's "Deploy Resolution Strategy" button. */
+  onDeployDisruption?: (ref: PendingDisruptionRef) => void;
 }
 
 type InspectorItem = { type: 'block' | 'train' | 'zone' | 'disruption'; id: string };
@@ -35,6 +37,7 @@ interface ChartDisruption {
   riskScore: number;
   affectedTrainIds: string[];
   strategy: string;
+  mastLabel: string;
 }
 
 function hhmm(mins: number): string {
@@ -89,6 +92,7 @@ export function TimeSpaceChart({
   blocks,
   assets,
   live,
+  onDeployDisruption,
 }: TimeSpaceChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -135,6 +139,9 @@ export function TimeSpaceChart({
           trainStops(t, stations, startKm, endKm).some((p) => Math.abs(p.km - asset.locationKm) <= 5),
         )
         .map((t) => t.trainId);
+      // Indian Railways OHE structure reference: mast at the whole-KM of the
+      // asset with a deterministic 10–39 digit branch suffix.
+      const mastLabel = `OHE Mast ${Math.floor(asset.locationKm)}/${10 + ((seed >> 4) % 30)} at KM ${asset.locationKm.toFixed(3)}`;
       list.push({
         id: `D-${asset.assetId}`,
         assetId: asset.assetId,
@@ -145,6 +152,7 @@ export function TimeSpaceChart({
         severity,
         riskScore: risk,
         affectedTrainIds: affectedTrainIds.slice(0, 6),
+        mastLabel,
         strategy:
           severity === 'CRITICAL'
             ? 'Emergency block + TSR 30 km/h; hold upstream, reschedule affected trains'
@@ -400,12 +408,19 @@ export function TimeSpaceChart({
           <Row k="Problem" v={KIND_LABEL[d.kind]} tone="text-red-400" />
           <Row k="Asset" v={`${d.assetId}`} />
           <Row k="Location" v={`${activeSection?.sectionName ?? 'Section'} · ${stationOf(d.km).stationName}`} />
+          <Row k="OHE Location" v={d.mastLabel} tone="text-sky-300" />
           <Row k="Chainage" v={`${Math.round(d.km)} KM`} />
           <Row k="Time Window" v={`${hhmm(d.startMins)} → ${hhmm(d.endMins)}`} />
           <Row k="Severity" v={d.severity} tone={severityTone} />
           <Row k="Risk R_i" v={d.riskScore.toFixed(2)} tone={severityTone} />
           <Row k="Affected Trains" v={d.affectedTrainIds.length > 0 ? d.affectedTrainIds.join(', ') : 'None yet'} />
           <Row k="Strategy" v={d.strategy} tone="text-emerald-300" />
+          <button
+            onClick={() => onDeployDisruption?.({ assetId: d.assetId, sectionName: activeSection?.sectionName ?? 'Section', kind: d.kind, km: d.km, riskScore: d.riskScore, mastLabel: d.mastLabel })}
+            className="mt-2 w-full rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-500 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-950 shadow-[0_0_14px_rgba(6,182,212,0.4)] transition-all hover:brightness-110"
+          >
+            Deploy Resolution Strategy →
+          </button>
         </div>
       );
     }
@@ -451,7 +466,7 @@ export function TimeSpaceChart({
   })();
 
   return (
-    <div className="flex h-full flex-col gap-3">
+    <div className="flex max-h-[calc(100vh-180px)] min-h-0 flex-col gap-3 overflow-auto">
       <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-slate-800/80 bg-slate-900/60 p-3 text-xs text-slate-200 shadow-2xl shadow-cyan-950/20 backdrop-blur-md">
         <span className="text-[13px] font-semibold text-slate-200">
           Interactive Time-Space String Diagram (COA / TMS View)
@@ -475,8 +490,9 @@ export function TimeSpaceChart({
         <TogglePill label="Conflicts Only" on={conflictsOnly} onClick={() => setConflictsOnly(!conflictsOnly)} />
         <span className="h-5 w-px bg-slate-700/60" />
         <div className="flex items-center gap-4">
-          <LegendDot color="#2196F3" label="Express" />
-          <LegendDot color="#FFC107" label="Freight" />
+          <LegendDot color="#38bdf8" label="Express (UP)" />
+          <LegendDot color="#eab308" label="Freight (DOWN)" />
+          <span className="text-[10px] text-slate-500">DOWN lane = dashed</span>
           <LegendDot color="#22c55e" label="Block" />
           <LegendDot color="#E53935" label="Conflict" />
           <LegendDot color="#ef4444" label="Disruption" />

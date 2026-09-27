@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { DisruptionAlert, DisruptionKind, RegisteredDisruption, StrategyType } from '../types';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { DisruptionAlert, DisruptionKind, PendingDisruptionRef, RegisteredDisruption, StrategyType } from '../types';
 import { errMessage, fetchDisruptions, injectDisruption, resolveDisruption } from '../services/api';
 import { addActivity } from '../services/activityLog';
 import { useAuth } from '../context/AuthContext';
 
 interface DisruptionResolverProps {
   latestAlert: DisruptionAlert | null;
+  /** Hand-off from the time-space inspector: auto-prefill, inject, evaluate. */
+  pending?: PendingDisruptionRef | null;
+  onPendingConsumed: () => void;
   onApplied: () => void;
 }
 
@@ -21,13 +24,15 @@ const STRATEGY_COLOR: Record<StrategyType, string> = {
   EMERGENCY_BLOCK: 'bg-rose-500',
 };
 
-export function DisruptionResolver({ latestAlert, onApplied }: DisruptionResolverProps) {
+export function DisruptionResolver({ latestAlert, pending, onPendingConsumed, onApplied }: DisruptionResolverProps) {
   const { canDispatch, guardDispatch } = useAuth();
   const [disruptions, setDisruptions] = useState<RegisteredDisruption[]>([]);
   const [applying, setApplying] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [recommended, setRecommended] = useState<{ eventId: string; strategyId: string } | null>(null);
+  const consumedRef = useRef<string | null>(null);
 
   const [form, setForm] = useState({ type: 'TRACK_INCIDENT' as DisruptionKind, startKm: 80, endKm: 120, description: '' });
 
@@ -46,6 +51,41 @@ export function DisruptionResolver({ latestAlert, onApplied }: DisruptionResolve
   useEffect(() => {
     void refresh();
   }, [refresh, latestAlert]);
+
+  // Inspector hand-off: prefill the form from the selected asset, auto-inject
+  // the disruption, evaluate the 3 recovery strategies and highlight the
+  // primary recommended one (lowest delay impact) for operator approval.
+  useEffect(() => {
+    if (!pending) return;
+    if (consumedRef.current === pending.assetId) return;
+    consumedRef.current = pending.assetId;
+    const fromKm = Math.max(0, Math.round(pending.km - 3));
+    const toKm = Math.round(pending.km + 3);
+    const note = `${pending.sectionName} · ${pending.mastLabel} · R_i ${pending.riskScore.toFixed(2)}`;
+    setForm({ type: pending.kind, startKm: fromKm, endKm: toKm, description: note });
+    setError(null);
+    (async () => {
+      try {
+        const registered = await injectDisruption({
+          type: pending.kind,
+          startKm: fromKm,
+          endKm: toKm,
+          description: `Auto-evaluated from control desk: ${note}`,
+        });
+        setDisruptions((prev) =>
+          [registered, ...prev.filter((d) => d.event.eventId !== registered.event.eventId)].slice(0, 12),
+        );
+        const strategies = registered.strategies.length > 0 ? registered.strategies : fallbackStrategies();
+        const primary = [...strategies].sort((a, b) => a.delayMins - b.delayMins)[0];
+        setRecommended({ eventId: registered.event.eventId, strategyId: primary.strategyId });
+        addActivity('DISRUPTION', `Auto-evaluated strategies for ${pending.mastLabel}`);
+      } catch (err) {
+        setError(errMessage(err));
+      } finally {
+        onPendingConsumed();
+      }
+    })();
+  }, [pending, onPendingConsumed]);
 
   const handleInject = useCallback(
     async (e: React.FormEvent) => {
@@ -109,6 +149,14 @@ export function DisruptionResolver({ latestAlert, onApplied }: DisruptionResolve
         <p className="text-[11px] text-amber-400">
           Apply Strategy requires the DISPATCHER or ADMIN role.
         </p>
+      )}
+
+      {recommended && (
+        <div className="rounded-lg border border-emerald-500/40 bg-emerald-950/40 px-4 py-2.5 text-xs text-emerald-200">
+          ⚡ Auto-evaluated from the control desk inspector —{' '}
+          <b>{recommended.strategyId.replace('_', ' ').toUpperCase()}</b> is the primary recommendation for{' '}
+          <b>{recommended.eventId}</b>. Review and apply below.
+        </div>
       )}
 
       <form
@@ -202,15 +250,26 @@ export function DisruptionResolver({ latestAlert, onApplied }: DisruptionResolve
           <p className="mb-3 text-sm text-slate-300">{d.event.description}</p>
 
           <div className="grid gap-3 sm:grid-cols-3">
-            {(d.strategies.length > 0 ? d.strategies : fallbackStrategies()).map((s) => (
-              <div
-                key={s.strategyId}
-                className="flex flex-col gap-2 rounded-lg border border-slate-700 bg-slate-950 p-3"
-              >
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-                  <span className={`h-2.5 w-2.5 rounded-full ${STRATEGY_COLOR[s.type]}`} />
-                  {s.name}
-                </div>
+            {(d.strategies.length > 0 ? d.strategies : fallbackStrategies()).map((s) => {
+              const isRec = recommended !== null && d.event.eventId === recommended.eventId && s.strategyId === recommended.strategyId;
+              return (
+                <div
+                  key={s.strategyId}
+                  className={`flex flex-col gap-2 rounded-lg border p-3 ${
+                    isRec
+                      ? 'border-emerald-400 bg-slate-900 shadow-[0_0_14px_rgba(16,185,129,0.3)] ring-2 ring-emerald-400/40'
+                      : 'border-slate-700 bg-slate-950'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+                    <span className={`h-2.5 w-2.5 rounded-full ${STRATEGY_COLOR[s.type]}`} />
+                    {s.name}
+                    {isRec && (
+                      <span className="ml-auto rounded-full bg-emerald-500/20 px-2 py-0.5 text-[9px] font-bold uppercase text-emerald-300">
+                        ★ Recommended
+                      </span>
+                    )}
+                  </div>
                 <p className="text-xs text-slate-400">
                   +{s.delayMins > 0 ? s.delayMins : '?'} min delay
                   {s.affectedTrainIds.length > 0 && (
@@ -236,8 +295,9 @@ export function DisruptionResolver({ latestAlert, onApplied }: DisruptionResolve
                     {message[d.event.eventId]}
                   </p>
                 )}
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         </div>
       ))}

@@ -187,6 +187,16 @@ export interface PlanCommitResult {
 export type DisruptionKind = 'SIGNAL_FAILURE' | 'TRACK_INCIDENT' | 'EQUIPMENT_FAILURE';
 export type StrategyType = 'UPSTREAM_HOLDING' | 'TSR_30KMH' | 'EMERGENCY_BLOCK';
 
+/** Hand-off from the time-space inspector into the Disruption Resolver workflow. */
+export interface PendingDisruptionRef {
+  assetId: string;
+  sectionName: string;
+  kind: DisruptionKind;
+  km: number;
+  riskScore: number;
+  mastLabel: string;
+}
+
 export interface RecoveryStrategy {
   strategyId: string;
   type: StrategyType;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { DisruptionAlert, TelemetryTick, TrainLive, ViewId, ZoneGroup } from './types';
+import type { DisruptionAlert, PendingDisruptionRef, TelemetryTick, TrainLive, ViewId, ZoneGroup } from './types';
 import { fetchActiveSection, fetchSections, selectSection } from './services/api';
 import { createTelemetrySocket } from './services/socket';
 import { addActivity } from './services/activityLog';
@@ -23,6 +23,7 @@ export function App() {
   const [socketConnected, setSocketConnected] = useState(false);
   const [alerts, setAlerts] = useState<DisruptionAlert[]>([]);
   const [live, setLive] = useState<Record<string, TrainLive>>({});
+  const [pendingDisruption, setPendingDisruption] = useState<PendingDisruptionRef | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +107,14 @@ export function App() {
     })();
   }, [activeDivisionId]);
 
+  // Inspector → Disruption Resolver hand-off: navigate to the tab and let the
+  // resolver prefill its form, auto-inject, and evaluate the 3 strategies.
+  const handleDeployDisruption = useCallback((ref: PendingDisruptionRef) => {
+    setPendingDisruption(ref);
+    setActiveView('disruption');
+  }, []);
+  const handlePendingConsumed = useCallback(() => setPendingDisruption(null), []);
+
   const assets = payload?.assets ?? [];
 
   return (
@@ -140,7 +149,12 @@ export function App() {
           ) : activeView === 'optimizer' ? (
             <OptimizerPanel divisionId={activeDivisionId} onCommitted={handleDataChanged} />
           ) : activeView === 'disruption' ? (
-            <DisruptionResolver latestAlert={alerts[0] ?? null} onApplied={handleDataChanged} />
+            <DisruptionResolver
+              latestAlert={alerts[0] ?? null}
+              pending={pendingDisruption}
+              onPendingConsumed={handlePendingConsumed}
+              onApplied={handleDataChanged}
+            />
           ) : activeView === 'audit' ? (
             <AuditLogs />
           ) : !payload ? (
@@ -157,6 +171,7 @@ export function App() {
               blocks={payload.blocks}
               assets={assets}
               live={live}
+              onDeployDisruption={handleDeployDisruption}
             />
           ) : (
             <NetworkMap
