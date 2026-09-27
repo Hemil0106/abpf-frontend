@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { enforceParity, stationsForDivision, trainsForDivision } from '../src/data/mockData';
+import { enforceParity, getFallbackTrains, stationsForDivision, trainsForDivision } from '../src/data/mockData';
 import type { TrainDto } from '../src/types';
+import {
+  ALL_AUTHENTIC_TRAINS,
+} from '../src/data/mockData';
 
 const CR = ['11057', '11058', '12123', '12124', '12137', '12138', '22221', '22222'];
 const WR = ['12951', '12952', '12953', '12954', '22901', '22902', 'FR-001', 'FR-002'].sort();
@@ -93,4 +96,22 @@ test('mockData: division id matching and schedule reversal under enforced parity
   const fixedStops = fixed.schedule!;
   assert.equal(fixedStops[0].stationName, 'B', 'schedule reversed so descent ends at the origin');
   assert.equal(fixedStops[fixedStops.length - 1].stationName, 'A');
+});
+
+test('mockData: getFallbackTrains guarantees the canvas is never blank', () => {
+  const cr = getFallbackTrains({ id: 'CR_MUMBAI', zone: 'CR' });
+  assert.ok(cr.length > 0, 'known division returns its authentic roster');
+  assert.deepEqual(new Set(cr.map((t) => t.trainId)), new Set(CR), 'CR fallback = CR catalog');
+  assert.ok(cr.every((t) => t.direction === 'UP' || t.direction === 'DOWN'), 'every fallback train carries a lane');
+
+  const wr = getFallbackTrains({ zone: 'WR' });
+  assert.ok(wr.length > 0, 'zone-only reference resolves to WR');
+  assert.ok(wr.every((t) => WR.includes(t.trainId)), 'WR fallback never leaks another zone');
+
+  const unknown = getFallbackTrains({ id: 'SCR_HYDERABAD', zone: 'SCR' });
+  assert.ok(unknown.length > 0, 'unknown division still yields authentic trains (no blank canvas)');
+  assert.ok(
+    unknown.every((t) => (ALL_AUTHENTIC_TRAINS as readonly string[]).includes(t.trainId)),
+    'union fallback only uses real train numbers',
+  );
 });

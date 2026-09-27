@@ -488,7 +488,8 @@ export function drawTimeSpace(
     ctx.arc(mx, my, 5, 0, Math.PI * 2);
     ctx.stroke();
     const nearBottom = my > yOf(minKm) - 14;
-    const label = trainId;
+    const liveDir = opts.trains.find((t) => t.trainId === trainId)?.direction;
+    const label = liveDir === 'DOWN' ? `${trainId} ▾` : liveDir === 'UP' ? `${trainId} ▴` : trainId;
     ctx.font = '9px monospace';
     const textW = ctx.measureText(label).width;
     ctx.fillStyle = 'rgba(25, 33, 48, 0.86)';

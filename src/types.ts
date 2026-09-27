@@ -44,6 +44,9 @@ export interface TrainDto {
   type?: 'FREIGHT' | 'EXPRESS' | 'PASSENGER';
   /** Optional explicit lane: wins over the stop-polyline slope when present. */
   direction?: 'UP' | 'DOWN';
+  /** Optional ownership hints from richer payloads, used for roster filtering. */
+  divisionId?: string;
+  zone?: string;
   schedule?: TrainStop[];
   stops?: TrainStop[];
   routePoints?: TrainStop[];

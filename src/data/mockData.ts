@@ -141,11 +141,11 @@ const CATALOGS: Record<string, DivisionCatalog> = {
 
 /** Match any division id / zone to a catalog: exact id, then zone-prefix. */
 function catalogFor(divisionId: string | null | undefined, zone?: string | null): DivisionCatalog | null {
-  if (!divisionId) return null;
-  if (CATALOGS[divisionId]) return CATALOGS[divisionId];
-  const probe = zone?.toUpperCase() ?? divisionId.toUpperCase();
+  const probe = zone?.toUpperCase() ?? divisionId?.toUpperCase();
+  if (!probe) return null;
+  if (divisionId && CATALOGS[divisionId]) return CATALOGS[divisionId];
   for (const c of Object.values(CATALOGS)) {
-    if (probe.startsWith(`${c.zone}_`) || probe.startsWith(`${c.zone}-`)) return c;
+    if (probe === c.zone || probe.startsWith(`${c.zone}_`) || probe.startsWith(`${c.zone}-`)) return c;
   }
   return null;
 }
@@ -197,6 +197,24 @@ export function stationsForDivision(
   zone?: string | null,
 ): StationDto[] {
   return catalogFor(divisionId, zone)?.stations ?? [];
+}
+
+export interface DivisionRef {
+  id?: string | null;
+  zone?: string | null;
+}
+
+/**
+ * The never-blank-canvas fallback: returns the active division's authentic
+ * roster when the division is recognised, or the full authentic union of all
+ * three zones for an unrecognised division (no zone constraint → no leakage,
+ * and the time-space canvas always has trains to draw). Every train is parity
+ * enforced so odd/even numbering always matches its drawn slope.
+ */
+export function getFallbackTrains(division?: DivisionRef | null): TrainDto[] {
+  const catalog = catalogFor(division?.id, division?.zone);
+  const roster = catalog ? catalog.trains : Object.values(CATALOGS).flatMap((c) => c.trains);
+  return enforceParity(roster);
 }
 
 export function isKnownDivision(divisionId: string | null | undefined): boolean {

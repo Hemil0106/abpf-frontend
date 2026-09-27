@@ -9,7 +9,7 @@ import {
   type ZoneHit,
 } from '../tsd/renderTimeSpace';
 import { kmToY, parseTimeToMinutes, timeToX, trainDelayMins, trajectoryPoint, trainStops, type TrajectoryPoint } from '../tsd/tsdMath';
-import { trainsForDivision } from '../data/mockData';
+import { enforceParity, getFallbackTrains } from '../data/mockData';
 
 interface TimeSpaceChartProps {
   startKm: number;
@@ -91,6 +91,7 @@ export function TimeSpaceChart({
   endKm,
   activeSection,
   stations,
+  trains: rawTrains,
   blocks,
   assets,
   live,
@@ -102,14 +103,31 @@ export function TimeSpaceChart({
   const liveRef = useRef(live);
   liveRef.current = live;
 
-  // Dynamic rostering: the active division's authentic catalog REPLACES
-  // whatever the backend seed sent, so cross-zone trains (e.g. 12002 Shatabdi
-  // or WCR services) can never appear inside a CR/WR/NWR timetable. Unknown
-  // divisions render an empty roster rather than a wrong zone's trains.
-  const trains = useMemo(
-    () => trainsForDivision(activeDivisionId, activeSection?.zone),
-    [activeDivisionId, activeSection?.zone],
+  // The active division descriptor the roster gate filters against: the id the
+  // header selected, the section's zone, and the backend's station list.
+  const activeDivision = useMemo(
+    () => ({ id: activeDivisionId, zone: activeSection?.zone ?? null, stations }),
+    [activeDivisionId, activeSection?.zone, stations],
   );
+
+  // Safe-train gate (NEVER a blank canvas): prefer the routed trains that
+  // belong to the active division (matched by division/zone id or an origin
+  // station on the section), else fall back to the authentic per-zone roster.
+  // A division known but with zero surviving trains still gets generation
+  // instead of an empty chart. Every survivor is parity enforced so odd/even
+  // numbering always matches the drawn slope.
+  const trains = useMemo(() => {
+    if (!rawTrains || rawTrains.length === 0) return getFallbackTrains(activeDivision);
+    const filtered = rawTrains.filter(
+      (t) =>
+        t.divisionId === activeDivision.id ||
+        t.zone === activeDivision.zone ||
+        activeDivision.stations.some(
+          (s) => s.stationName.toLowerCase() === (t.originStation ?? '').toLowerCase(),
+        ),
+    );
+    return filtered.length > 0 ? enforceParity(filtered) : getFallbackTrains(activeDivision);
+  }, [rawTrains, activeDivision]);
   const hitsRef = useRef<{
     blocks: BlockHit[];
     live: LiveHit[];
