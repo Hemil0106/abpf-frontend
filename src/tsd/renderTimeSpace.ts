@@ -4,7 +4,6 @@ import {
   getMinutesFromMidnight,
   kmOfStation,
   kmToY,
-  riskColor,
   segmentIntersection,
   timeToX,
   trainStops,
@@ -66,30 +65,31 @@ export interface RenderStats {
   zoneHits: ZoneHit[];
 }
 
-const HEAT_SLICES = 40;
+// Desktop palette mirror (ThemeConstants + TimeSpaceCanvas grid/risk colors):
+// priority ≤ 2 = ACCENT_BLUE (Express), else ACCENT_AMBER (Freight/Local).
+const ACCENT_BLUE = '#2196F3';
+const ACCENT_AMBER = '#FFC107';
+const ACCENT_GREEN = '#4CAF50';
+const ACCENT_RED = '#E53935';
+const GRID_MAJOR = '#2A3550';
+const GRID_MINOR = '#1E2638';
+const STATION_LINE = '#3A4560';
 
-/** Failure risk above which an asset becomes a rendered "Critical Zone". */
-const CRITICAL_ZONE_THRESHOLD = 0.6;
+const LEFT_PAD = 80;
+const TOP_PAD = 40;
+const BOTTOM_PAD = 65;
+const RIGHT_PAD = 40;
 
-/** Pulsing hexagon outline path around (cx, cy). */
-function fillHexagon(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
-  ctx.beginPath();
-  for (let i = 0; i < 6; i++) {
-    const a = (Math.PI / 3) * i - Math.PI / 6;
-    const px = cx + r * Math.cos(a);
-    const py = cy + r * Math.sin(a);
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
-  }
-  ctx.closePath();
-}
+/** Train string color: high priority → blue, rest → amber (desktop mirror). */
+const colorOf = (train: TrainDto) => (train.priority <= 2 ? ACCENT_BLUE : ACCENT_AMBER);
 
-/** Chainage gap below which a live marker sits on a station line and its label must flip below it. */
-const LABEL_FLIP_KM = 12;
+/** Maintenance-block priority → accent color: p≥3 red, p≥2 amber, else green. */
+const blockColor = (block: BlockDto) =>
+  block.blockPriority >= 3 ? ACCENT_RED : block.blockPriority >= 2 ? ACCENT_AMBER : ACCENT_GREEN;
 
-/** Sloped line palette: freight amber, everything else sky blue (desktop legend). */
-const colorOf = (train: TrainDto) =>
-  train.type === 'FREIGHT' ? '#eab308' : '#38bdf8';
+/** Desktop risk dot color bands: <0.35 green, ≤0.60 amber, else red. */
+const riskDotColor = (risk: number) =>
+  risk < 0.35 ? ACCENT_GREEN : risk <= 0.6 ? ACCENT_AMBER : ACCENT_RED;
 
 /** A maintenance block window in (time, km) axes, km normalized low→high. */
 interface BlockWindow {
@@ -131,26 +131,10 @@ function segmentRectHit(seg: Segment, win: BlockWindow): { x: number; y: number 
   return null;
 }
 
-/** Live marker sits on the train's string: interpolate the time at which the
- * schedule crosses the live chainage, so trains never stack on one X. */
-function timeAtKmOnSchedule(points: { timeMins: number; km: number }[], km: number): number | null {
-  for (let i = 0; i < points.length - 1; i++) {
-    const a = points[i];
-    const b = points[i + 1];
-    const lo = Math.min(a.km, b.km);
-    const hi = Math.max(a.km, b.km);
-    if (km >= lo && km <= hi) {
-      const ratio = (km - lo) / Math.max(1e-9, hi - lo);
-      return a.timeMins + ratio * (b.timeMins - a.timeMins);
-    }
-  }
-  return null;
-}
-
 /**
  * Renders the time-space string diagram (Java Swing engine replicant).
  * X is minutes-of-day mapped across the padded horizontal axis (80px left gutter
- * for the KM/Y labels, 40px right), Y is chainage KM with a 40px gutter. Pure +
+ * for the KM/Y labels, 40px right), Y is chainage KM with 65px bottom gutter. Pure +
  * side-effect-free apart from the given 2D context, so self-checks can drive it
  * with a mock context.
  */
@@ -186,44 +170,58 @@ export function drawTimeSpace(
 
   ctx.font = '11px ui-monospace, monospace';
 
-  // Background grid: dashed horizontal lines at every station KM (section bounds
-  // included) and dashed vertical lines at 2-hour X-axis ticks 00:00 → 24:00.
+  const plotW = width - LEFT_PAD - RIGHT_PAD;
+  const plotH = height - TOP_PAD - BOTTOM_PAD;
+
+  // Desktop grid mirror: solid 10-KM horizontals (major at multiples of 50)
+  // with numeric "N KM" labels right-aligned to the left gutter, 30-minute
+  // verticals (hour lines heavier) with hour labels below the plot, dashed
+  // station lines with names in the right gutter, and a plot border box.
   ctx.save();
-  ctx.setLineDash([5, 5]);
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.18)';
-  const gridKms = new Set<number>([minKm, maxKm, ...opts.stations.map((s) => s.km)]);
-  for (const km of gridKms) {
+  ctx.font = '10px monospace';
+  for (let km = Math.ceil(minKm / 10) * 10; km <= Math.floor(maxKm / 10) * 10; km += 10) {
     const y = yOf(km);
+    ctx.strokeStyle = km % 50 === 0 ? GRID_MAJOR : GRID_MINOR;
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
+    ctx.moveTo(LEFT_PAD, y);
+    ctx.lineTo(LEFT_PAD + plotW, y);
     ctx.stroke();
+    const label = `${km} KM`;
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText(label, LEFT_PAD - ctx.measureText(label).width - 6, y + 4);
   }
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-  for (let hour = 0; hour <= 24; hour += 2) {
-    const gx = xOf(hour * 60);
+  for (let min = 0; min <= 1440; min += 30) {
+    const gx = xOf(min);
+    const isHour = min % 60 === 0;
+    ctx.strokeStyle = isHour ? GRID_MAJOR : GRID_MINOR;
+    ctx.lineWidth = isHour ? 1 : 0.5;
     ctx.beginPath();
-    ctx.moveTo(gx, 20);
-    ctx.lineTo(gx, height - 55);
+    ctx.moveTo(gx, TOP_PAD);
+    ctx.lineTo(gx, TOP_PAD + plotH);
     ctx.stroke();
+    if (isHour) {
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(`${String(min / 60).padStart(2, '0')}:00`, gx - 14, TOP_PAD + plotH + 16);
+    }
   }
-  ctx.restore();
-
-  // Explicit X-axis time labels (every 2 hours) in the 55px bottom gutter.
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '12px monospace';
-  for (let hour = 0; hour <= 24; hour += 2) {
-    const label = `${String(hour).padStart(2, '0')}:00`;
-    ctx.fillText(label, xOf(hour * 60) - 15, height - 18);
-  }
-
-  // Station labels along the Y (KM) axis.
-  ctx.fillStyle = '#94a3b8';
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = STATION_LINE;
   for (const station of opts.stations) {
-    ctx.fillText(`${station.stationName}  ${station.km}KM`, 6, yOf(station.km) - 3);
+    const y = yOf(station.km);
+    ctx.beginPath();
+    ctx.moveTo(LEFT_PAD, y);
+    ctx.lineTo(LEFT_PAD + plotW, y);
+    ctx.stroke();
+    ctx.fillStyle = '#E0E0E0';
+    ctx.fillText(station.stationName, LEFT_PAD + plotW + 6, y + 4);
     stats.stations += 1;
   }
+  ctx.setLineDash([]);
+  ctx.strokeStyle = GRID_MAJOR;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(LEFT_PAD, TOP_PAD, plotW, plotH);
+  ctx.restore();
 
   // Active maintenance block windows (green), used later for conflict detection.
   const blockWindows: BlockWindow[] = opts.blocks.map((b) => ({
@@ -234,8 +232,6 @@ export function drawTimeSpace(
   }));
 
   if (opts.showBlocks) {
-    ctx.fillStyle = 'rgba(34, 197, 94, 0.25)';
-    ctx.strokeStyle = '#22c55e';
     for (const block of opts.blocks) {
       const x1 = xOf(getMinutesFromMidnight(block.startTime));
       const x2 = xOf(getMinutesFromMidnight(block.endTime));
@@ -245,74 +241,73 @@ export function drawTimeSpace(
       const by = Math.min(y1, y2);
       const bw = Math.max(2, x2 - x1);
       const bh = Math.abs(y2 - y1);
-      ctx.fillRect(bx, by, bw, bh);
-      ctx.strokeRect(bx, by, bw, bh);
+      const base = blockColor(block);
+      ctx.fillStyle = hexA(base, 0.16);
+      ctx.strokeStyle = hexA(base, 0.7);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, bw, bh, 10);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 10px monospace';
+      ctx.fillText(block.blockId, bx + 8, by + 16);
       stats.blocks += 1;
       stats.blockHits.push({ blockId: block.blockId, x: bx, y: by, w: bw, h: bh });
     }
   }
 
-  // Heatmap overlay: vertical risk bands by asset failure risk.
+  // Risk Overlay (desktop mirror): coloured dots in the left gutter at each
+  // asset's chainage, radius scaled by failureRiskScore. Each dot is a click
+  // target for the inspector.
   if (opts.showHeatmap) {
-    const band = (maxKm - minKm) / HEAT_SLICES;
-    for (let i = 0; i < HEAT_SLICES; i++) {
-      const centerKm = minKm + band * (i + 0.5);
-      const risk = opts.assets.reduce(
-        (acc, a) =>
-          a.locationKm >= centerKm - band / 2 && a.locationKm <= centerKm + band / 2
-            ? Math.max(acc, a.failureRiskScore)
-            : acc,
-        -Infinity,
-      );
-      if (!Number.isFinite(risk)) continue;
-      ctx.fillStyle = hexA(riskColor(risk), 0.18);
-      const yTop = yOf(centerKm - band / 2);
-      const yBottom = yOf(centerKm + band / 2);
-      ctx.fillRect(0, yBottom, width, Math.max(1, yTop - yBottom));
-      stats.heatSlices += 1;
-    }
-  }
-
-  // Critical Zone badges: pulsing amber/red hexagon per asset with
-  // failureRiskScore above the threshold, pinned to its chainage height in the
-  // right gutter (clear of the KM/time labels). Each badge is a click target.
-  if (opts.assets.length > 0) {
-    const badgeWave = Math.abs(Math.sin(Date.now() / 350));
     for (const asset of opts.assets) {
-      if (asset.failureRiskScore <= CRITICAL_ZONE_THRESHOLD) continue;
       if (asset.locationKm < minKm || asset.locationKm > maxKm) continue;
-      const critical = asset.failureRiskScore >= 0.8;
-      const cx = width - 28;
-      const cy = yOf(asset.locationKm);
-      const r = 8 + 3 * badgeWave;
-      fillHexagon(ctx, cx, cy, r);
-      ctx.fillStyle = critical ? 'rgba(220, 38, 38, 0.3)' : 'rgba(245, 158, 11, 0.25)';
+      const y = yOf(asset.locationKm);
+      const x = LEFT_PAD - 4;
+      const r = 2 + asset.failureRiskScore * 6;
+      ctx.fillStyle = hexA(riskDotColor(asset.failureRiskScore), 120 / 255);
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = critical ? '#dc2626' : '#f59e0b';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.fillStyle = critical ? '#fecaca' : '#fde68a';
-      ctx.font = '10px monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('!', cx, cy);
-      ctx.textAlign = 'start';
-      ctx.textBaseline = 'alphabetic';
-      stats.zoneHits.push({ assetId: asset.assetId, x: cx, y: cy });
+      stats.heatSlices += 1;
+      stats.zoneHits.push({ assetId: asset.assetId, x, y });
     }
   }
 
-  // Train trajectories: one sloped polyline per train over its schedule stops.
-  // Fallback stops (origin→destination times) are generated when no schedule
-  // payload is present. Labels sit beside the first point (+10 X, +4 Y).
+  // Train trajectories (desktop mirror): soft glow underlay + 2.5px core,
+  // coloured by priority (≤2 blue, else amber); with "Conflicts Only" enabled
+  // non-conflicting strings are dimmed instead of hidden. The id label sits in
+  // a dark pill at the string's chord midpoint.
   const polylines = opts.trains.map((train) => ({ train, points: trainStops(train, opts.stations, minKm, maxKm) }));
+
+  const conflicted = new Map<string, boolean>();
+  for (const { train, points } of polylines) {
+    const segs = segmentsOf(points.map((p) => ({ x1: p.timeMins, y1: p.km })));
+    conflicted.set(train.trainId, segs.some((seg) => blockWindows.some((win) => segmentRectHit(seg, win))));
+  }
 
   for (const { train, points } of polylines) {
     if (points.length < 2) continue;
     if (!points.some((p) => scale.inView(p.timeMins))) continue;
-    if (opts.conflictsOnly) continue;
-    ctx.strokeStyle = colorOf(train);
-    ctx.lineWidth = 2.5;
+    const color = colorOf(train);
+    const dim = opts.conflictsOnly && !(conflicted.get(train.trainId) ?? false);
+    if (dim) {
+      ctx.strokeStyle = hexA(color, 30 / 255);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      points.forEach((p, idx) => {
+        const px = xOf(p.timeMins);
+        const py = yOf(p.km);
+        if (idx === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.stroke();
+      stats.trains += 1;
+      continue;
+    }
+    ctx.strokeStyle = hexA(color, 35 / 255);
+    ctx.lineWidth = 7;
     ctx.beginPath();
     points.forEach((p, idx) => {
       const px = xOf(p.timeMins);
@@ -321,16 +316,28 @@ export function drawTimeSpace(
       else ctx.lineTo(px, py);
     });
     ctx.stroke();
-    ctx.fillStyle = '#e2e8f0';
-    ctx.fillText(train.trainId, xOf(points[0].timeMins) + 10, yOf(points[0].km) + 4);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    const first = points[0];
+    const last = points[points.length - 1];
+    const midX = (xOf(first.timeMins) + xOf(last.timeMins)) / 2;
+    const midY = (yOf(first.km) + yOf(last.km)) / 2;
+    const label = train.trainId;
+    ctx.font = '9px monospace';
+    const textW = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(25, 33, 48, 0.86)';
+    ctx.beginPath();
+    ctx.roundRect(midX - 2, midY - 13, textW + 8, 14, 8);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(label, midX + 2, midY - 3);
     stats.trains += 1;
   }
 
-  // Conflict halos: pulsing red rings where a trajectory cuts an active
-  // maintenance block window.
-  if (opts.showBlocks && blockWindows.length > 0) {
-    const wave = Math.abs(Math.sin(Date.now() / 350));
-    const ringRadius = 14 + 10 * wave;
+  // Conflict halos (desktop mirror): three concentric red ovals where a
+  // trajectory cuts an active maintenance block window.
+  if (blockWindows.length > 0) {
     for (const { points } of polylines) {
       const segs = segmentsOf(points.map((p) => ({ x1: p.timeMins, y1: p.km })));
       for (const win of blockWindows) {
@@ -339,17 +346,22 @@ export function drawTimeSpace(
           if (!hit || !scale.inView(hit.x)) continue;
           const cx = xOf(hit.x);
           const cy = yOf(hit.y);
-          const gradient = ctx.createRadialGradient(cx, cy, 1, cx, cy, ringRadius + 12);
-          gradient.addColorStop(0, 'rgba(229, 57, 53, 0.9)');
-          gradient.addColorStop(1, 'rgba(229, 57, 53, 0)');
-          ctx.fillStyle = gradient;
+          ctx.fillStyle = hexA(ACCENT_RED, 25 / 255);
           ctx.beginPath();
-          ctx.arc(cx, cy, ringRadius + 12, 0, Math.PI * 2);
+          ctx.arc(cx, cy, 14, 0, Math.PI * 2);
           ctx.fill();
-          ctx.strokeStyle = '#E53935';
-          ctx.lineWidth = 2;
+          ctx.fillStyle = hexA(ACCENT_RED, 55 / 255);
           ctx.beginPath();
-          ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+          ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = hexA(ACCENT_RED, 180 / 255);
+          ctx.beginPath();
+          ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = ACCENT_RED;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(cx, cy, 6, 0, Math.PI * 2);
           ctx.stroke();
           stats.conflicts += 1;
         }
@@ -357,33 +369,30 @@ export function drawTimeSpace(
     }
   }
 
-  // Live train markers: a pulsing red ring at each train's current position
-// sitting ON its own trajectory string (live chainage interpolated against the
-// schedule). Trains without a schedule crossover fall back to their reported
-// position time, then the cursor time — never a shared mid-canvas X. The label
-// flips below the marker when it sits on/near a station line.
-  const liveWave = Math.abs(Math.sin(Date.now() / 350));
+  // Live train markers (desktop mirror): glowing amber dot on the current-time
+  // column at each train's reported chainage, id label beside the marker.
+  const nowX = xOf(opts.cursorMin);
   for (const [trainId, pos] of Object.entries(opts.live)) {
     if (pos.km < minKm || pos.km > maxKm) continue;
-    const trainPoly = polylines.find((p) => p.train.trainId === trainId);
-    const onTrajectory = trainPoly ? timeAtKmOnSchedule(trainPoly.points, pos.km) : null;
-    const mx = xOf(onTrajectory ?? pos.mins ?? opts.cursorMin);
     const my = yOf(pos.km);
-    const liveRadius = 10 + 4 * liveWave;
-    ctx.strokeStyle = '#ef4444';
-    ctx.lineWidth = 2.5;
+    ctx.fillStyle = hexA(ACCENT_AMBER, 60 / 255);
     ctx.beginPath();
-    ctx.arc(mx, my, liveRadius, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.arc(nowX, my, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = ACCENT_AMBER;
     ctx.beginPath();
-    ctx.arc(mx, my, Math.max(2, liveRadius - 5), 0, Math.PI * 2);
+    ctx.arc(nowX, my, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#0b1220';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(nowX, my, 5, 0, Math.PI * 2);
     ctx.stroke();
-    const nearStation = opts.stations.some((s) => Math.abs(s.km - pos.km) < LABEL_FLIP_KM);
-    const labelY = nearStation ? my + 16 : my - 8;
-    ctx.fillStyle = '#fecaca';
-    ctx.fillText(trainId, mx + 8, labelY);
+    ctx.fillStyle = ACCENT_AMBER;
+    ctx.font = 'bold 9px monospace';
+    ctx.fillText(trainId, nowX + 10, my + 3);
     stats.live += 1;
-    stats.liveHits.push({ trainId, x: mx, y: my });
+    stats.liveHits.push({ trainId, x: nowX, y: my });
   }
 
   return stats;

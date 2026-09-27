@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AssetDto, BlockDto, SectionDto, StationDto, TrainDto, TrainLive } from '../types';
 import { drawTimeSpace, type BlockHit, type LiveHit, type ZoneHit } from '../tsd/renderTimeSpace';
-import { liveKmAtTime, parseTimeToMinutes, trainDelayMins, trainStops } from '../tsd/tsdMath';
+import { parseTimeToMinutes, trainDelayMins } from '../tsd/tsdMath';
 
 interface TimeSpaceChartProps {
   startKm: number;
@@ -70,7 +70,7 @@ export function TimeSpaceChart({
       const rect = wrap.getBoundingClientRect();
       if (rect.width === 0) return;
       // Horizontal zoom grows the canvas width so the day keeps a constant
-      // pixel pitch and the window scrolls; 55px bottom gutter holds the
+      // pixel pitch and the window scrolls; 65px bottom gutter holds the
       // explicit time labels.
       const zoomWidth = Math.max(rect.width, rect.width * zoom);
       canvas.width = Math.round(zoomWidth * dpr);
@@ -81,20 +81,14 @@ export function TimeSpaceChart({
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // Deterministic trajectory-locked positions: live chainage is a pure
-      // function of the wall clock and the schedule (liveKmAtTime interpolates
-      // the active [stopA → stopB] segment), so markers glide along their own
-      // strings with zero noise and never oscillate.
+      // Live markers are drawn at the current-time column using each train's
+      // reported chainage (desktop mirror), so positions pass through raw.
       const nowMin = parseTimeToMinutes(new Date());
       const slides: Record<string, TrainLive> = {};
       for (const [trainId, target] of Object.entries(liveRef.current)) {
         const train = trains.find((t) => t.trainId === trainId);
         const speedKmh = target.speedKmh > 0 ? target.speedKmh : categorySpeed(train);
-        slides[trainId] = {
-          km: train ? liveKmAtTime(trainStops(train, stations, startKm, endKm), nowMin) : target.km,
-          mins: target.mins,
-          speedKmh,
-        };
+        slides[trainId] = { km: target.km, mins: target.mins, speedKmh };
       }
 
       const stats = drawTimeSpace(ctx, {
@@ -342,7 +336,7 @@ export function TimeSpaceChart({
             onChange={(e) => setShowHeatmap(e.target.checked)}
             className="accent-[#2196F3]"
           />
-          Show Risk Heatmap Overlay
+          Risk Overlay
         </label>
         <label className="flex cursor-pointer items-center gap-1.5">
           <input
@@ -351,7 +345,7 @@ export function TimeSpaceChart({
             onChange={(e) => setShowBlocks(e.target.checked)}
             className="accent-[#2196F3]"
           />
-          Show Maintenance Blocks
+          Maintenance Blocks
         </label>
         <label className="flex cursor-pointer items-center gap-1.5">
           <input
@@ -360,21 +354,20 @@ export function TimeSpaceChart({
             onChange={(e) => setConflictsOnly(e.target.checked)}
             className="accent-[#2196F3]"
           />
-          Highlight Conflicts Only
+          Conflicts Only
         </label>
         <span className="h-6 w-px bg-[#2A3550]" />
         <div className="flex items-center gap-4">
-          <LegendDot color="#38bdf8" label="Express / Passenger" />
-          <LegendDot color="#eab308" label="Freight / Local" />
-          <LegendDot color="#4CAF50" label="Active Block" />
-          <LegendDot color="#E53935" label="Conflict Point" />
-          <LegendDot color="#f59e0b" label="Critical Zone" />
+          <LegendDot color="#2196F3" label="Express" />
+          <LegendDot color="#FFC107" label="Freight" />
+          <LegendDot color="#4CAF50" label="Block" />
+          <LegendDot color="#E53935" label="Conflict" />
         </div>
         <span className="ml-auto text-[10px] text-slate-500">Click a train / block / zone to inspect</span>
       </div>
       <div
         ref={wrapRef}
-        className="relative min-h-0 flex-1 overflow-x-auto overflow-y-hidden rounded-lg border border-slate-800 bg-slate-950"
+        className="relative min-h-0 flex-1 overflow-x-auto overflow-y-hidden rounded-lg border border-slate-800 bg-slate-950 pb-4"
       >
         <canvas
           ref={canvasRef}

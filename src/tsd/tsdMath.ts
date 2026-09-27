@@ -115,10 +115,10 @@ export function timeToXCoordinate(
 
 /**
  * Chainage km → canvas Y. `paddingTop` leaves room for the axis label above the
- * highest KM; `paddingBottom` (55px) is a deep bottom gutter so the explicit
- * hourly time labels never collide with the station name at the section's
- * lower bound. `maxKm - minKm` is floored at 1 so a degenerate section can
- * never produce NaN/Infinity Y.
+ * highest KM; `paddingBottom` (65px) is a deep bottom gutter so the X-axis
+ * baseline, tick marks and time labels never collide with the station name at
+ * the section's lower bound. `maxKm - minKm` is floored at 1 so a degenerate
+ * section can never produce NaN/Infinity Y.
  */
 export function kmToY(
   km: number,
@@ -126,7 +126,7 @@ export function kmToY(
   maxKm: number,
   height: number,
   paddingTop = 40,
-  paddingBottom = 55,
+  paddingBottom = 65,
 ): number {
   const ratio = (km - minKm) / Math.max(1, maxKm - minKm);
   return height - paddingBottom - ratio * (height - paddingTop - paddingBottom);

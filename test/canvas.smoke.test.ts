@@ -85,7 +85,7 @@ test('tsdMath: parse time inputs, full-width X mapping, day window, segments, de
   assert.equal(riskLevel(0.9), 'critical');
 
   const scale = buildDayScale({ height: 400, startKm: 0, endKm: 320, zoom: 1 });
-  assert.equal(scale.y(0), 345, 'min km sits in the 55px bottom gutter');
+  assert.equal(scale.y(0), 335, 'min km sits in the 65px bottom gutter');
   assert.equal(scale.y(320), 40, 'max km sits in the top gutter');
   assert.ok(scale.inView(720));
 
@@ -118,10 +118,10 @@ test('tsdMath: robust stop parsing, X/Y converters, degenerate-section guards', 
   assert.equal(timeToX(360, 800), 250, 'timeToX quarter-day');
   assert.equal(Math.round(timeToX('06:30', 800) * 100) / 100, 264.17, 'timeToX parses bare HH:mm');
 
-  assert.equal(kmToY(0, 0, 320, 400), 345, 'min km sits in the 55px bottom gutter');
+  assert.equal(kmToY(0, 0, 320, 400), 335, 'min km sits in the 65px bottom gutter');
   assert.equal(kmToY(320, 0, 320, 400), 40, 'max km sits in the top gutter');
-  assert.equal(kmToY(160, 0, 320, 400), 192.5, 'mid-section sits mid-canvas');
-  assert.equal(kmToY(100, 100, 100, 400), 345, 'degenerate 0-length section never NaNs');
+  assert.equal(kmToY(160, 0, 320, 400), 187.5, 'mid-section sits mid-canvas');
+  assert.equal(kmToY(100, 100, 100, 400), 335, 'degenerate 0-length section never NaNs');
 
   const t = (extra: Partial<TrainDto>): TrainDto => ({
     trainId: 'T9', trainName: 'T9', priority: 3,
@@ -214,21 +214,22 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
   assert.equal(stats.blocks, 1);
   assert.ok(stats.conflicts >= 1, 'a train through an active block window must draw a halo');
   assert.equal(stats.live, 1);
-  assert.ok(stats.heatSlices > 0, 'heatmap slices must be drawn');
-  assert.ok(calls.includes('addColorStop'), 'conflict halo gradient must be built');
-  assert.ok(calls.includes('setLineDash'), 'dashed station/time grid must be drawn');
+  assert.ok(stats.heatSlices > 0, 'risk overlay dots must be drawn');
+  assert.ok(calls.includes('arc'), 'conflict halos and risk dots must draw ovals');
+  assert.ok(calls.includes('setLineDash'), 'dashed station lines must be drawn');
+  assert.ok(calls.includes('roundRect'), 'rounded block + train-label pills must be drawn');
 
   assert.equal(stats.blockHits.length, 1, 'block hit box must be reported for hover');
   assert.equal(stats.blockHits[0].blockId, 'B1');
   assert.ok(stats.blockHits[0].w > 0 && stats.blockHits[0].h > 0, 'block hit box must be non-empty');
   assert.equal(stats.liveHits.length, 1, 'live marker hit position must be reported for hover');
   assert.equal(stats.liveHits[0].trainId, 'T1');
-  assert.equal(Math.round(stats.liveHits[0].x), Math.round(timeToX(450, 800)), 'live marker X interpolates ON its trajectory at the live KM');
+  assert.equal(Math.round(stats.liveHits[0].x), Math.round(timeToX(480, 800)), 'live marker pins to the current-time column');
 
-  assert.equal(stats.zoneHits.length, 1, 'high-risk asset zone must be reported for click inspection');
+  assert.equal(stats.zoneHits.length, 1, 'risk dot must be reported for click inspection');
   assert.equal(stats.zoneHits[0].assetId, 'A1');
-  assert.equal(Math.round(stats.zoneHits[0].x), 800 - 28, 'zone badge pins to the right gutter');
-  assert.equal(Math.round(stats.zoneHits[0].y), Math.round(kmToY(100, 0, 320, 400)), 'zone badge sits at the asset chainage height');
+  assert.equal(Math.round(stats.zoneHits[0].x), 80 - 4, 'risk dot pins to the left gutter');
+  assert.equal(Math.round(stats.zoneHits[0].y), Math.round(kmToY(100, 0, 320, 400)), 'risk dot sits at the asset chainage height');
 });
 
 test('drawNetworkMap: nodes, risk-tinted corridors', () => {
