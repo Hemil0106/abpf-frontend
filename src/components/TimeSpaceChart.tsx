@@ -9,6 +9,7 @@ import {
   type ZoneHit,
 } from '../tsd/renderTimeSpace';
 import { kmToY, parseTimeToMinutes, timeToX, trainDelayMins, trajectoryPoint, trainStops, type TrajectoryPoint } from '../tsd/tsdMath';
+import { trainsForDivision } from '../data/mockData';
 
 interface TimeSpaceChartProps {
   startKm: number;
@@ -19,6 +20,8 @@ interface TimeSpaceChartProps {
   blocks: readonly BlockDto[];
   assets: readonly AssetDto[];
   live: Readonly<Record<string, TrainLive>>;
+  /** Active division id is the dynamic train-rostering key (per-zone catalog). */
+  activeDivisionId?: string | null;
   /** Fired by the inspector's "Deploy Resolution Strategy" button. */
   onDeployDisruption?: (ref: PendingDisruptionRef) => void;
 }
@@ -88,16 +91,25 @@ export function TimeSpaceChart({
   endKm,
   activeSection,
   stations,
-  trains,
   blocks,
   assets,
   live,
+  activeDivisionId,
   onDeployDisruption,
 }: TimeSpaceChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef(live);
   liveRef.current = live;
+
+  // Dynamic rostering: the active division's authentic catalog REPLACES
+  // whatever the backend seed sent, so cross-zone trains (e.g. 12002 Shatabdi
+  // or WCR services) can never appear inside a CR/WR/NWR timetable. Unknown
+  // divisions render an empty roster rather than a wrong zone's trains.
+  const trains = useMemo(
+    () => trainsForDivision(activeDivisionId, activeSection?.zone),
+    [activeDivisionId, activeSection?.zone],
+  );
   const hitsRef = useRef<{
     blocks: BlockHit[];
     live: LiveHit[];

@@ -171,6 +171,7 @@ export function App() {
               blocks={payload.blocks}
               assets={assets}
               live={live}
+              activeDivisionId={activeDivisionId}
               onDeployDisruption={handleDeployDisruption}
             />
           ) : (
