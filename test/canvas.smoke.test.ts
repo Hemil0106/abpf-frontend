@@ -7,6 +7,7 @@ import {
   getMinutesFromMidnight,
   kmOfStation,
   kmToY,
+  liveKmAtTime,
   parseTimeInput,
   riskLevel,
   segmentIntersection,
@@ -43,7 +44,7 @@ test('tsdMath: parse time inputs, full-width X mapping, day window, segments, de
 
   assert.equal(timeToXCoordinate(0, 800), 80, 'midnight maps to the padded left edge');
   assert.equal(timeToXCoordinate(1440, 800), 760, 'end-of-day maps to width - paddingRight');
-  assert.equal(timeToXCoordinate(720, 800, 3), 420, 'day-centred zoom keeps mid-day centred');
+  assert.equal(timeToXCoordinate(720, 800, 3), 420, 'padded mid-day maps identically at any zoom');
   assert.equal(timeToXCoordinate(720, 800), 420, 'mid-day maps to the padded mid-canvas');
 
   const stations: StationDto[] = [
@@ -66,6 +67,11 @@ test('tsdMath: parse time inputs, full-width X mapping, day window, segments, de
     originStation: 'BRC', destinationStation: 'MMCT', loopLineRequirement: false,
   };
   const kmOf = (name: string | null) => kmOfStation(name, stations, 0, 320);
+  const segmentStops = [
+    { timeMins: 360, km: 0 },
+    { timeMins: 480, km: 160 },
+    { timeMins: 600, km: 320 },
+  ];
   const s1 = trainSegment(t1, kmOf);
   const s2 = trainSegment(t2, kmOf);
   assert.equal(s1.x1, 360, 'departure maps to minutes-of-day');
@@ -79,13 +85,18 @@ test('tsdMath: parse time inputs, full-width X mapping, day window, segments, de
   assert.equal(riskLevel(0.9), 'critical');
 
   const scale = buildDayScale({ height: 400, startKm: 0, endKm: 320, zoom: 1 });
-  assert.equal(scale.y(0), 360, 'min km sits in the bottom gutter');
+  assert.equal(scale.y(0), 345, 'min km sits in the 55px bottom gutter');
   assert.equal(scale.y(320), 40, 'max km sits in the top gutter');
   assert.ok(scale.inView(720));
 
   assert.equal(trainDelayMins(t1, 0, 320, parseTimeInput('08:00'), 120), 30, '40 km behind at 0.75 min/km');
   assert.equal(trainDelayMins(t1, 0, 320, parseTimeInput('12:00'), 300), 15, 'late into the section on final chainage');
   assert.equal(trainDelayMins(t1, 0, 320, parseTimeInput('08:00')), 0, 'on-schedule with no live reading is 0');
+
+  assert.equal(liveKmAtTime(segmentStops, 360), 0, 'locked to origin before departure');
+  assert.equal(liveKmAtTime(segmentStops, 450), 120, 't = (450-360)/120 interpolates km between stops');
+  assert.equal(liveKmAtTime(segmentStops, 480), 160, 'schedule mid-stop pins the exact chainage');
+  assert.equal(liveKmAtTime(segmentStops, 700), 320, 'clamped to the destination after arrival');
 });
 
 test('tsdMath: robust stop parsing, X/Y converters, degenerate-section guards', () => {
@@ -103,14 +114,14 @@ test('tsdMath: robust stop parsing, X/Y converters, degenerate-section guards', 
 
   assert.equal(timeToX(0, 800), 80, 'timeToX padded left edge');
   assert.equal(timeToX(1440, 800), 760, 'timeToX padded right edge');
-  assert.equal(timeToX(720, 800, 3), 420, 'timeToX day-centred zoom');
+  assert.equal(timeToX(720, 800, 3), 420, 'timeToX padded mid-day at any zoom');
   assert.equal(timeToX(360, 800), 250, 'timeToX quarter-day');
   assert.equal(Math.round(timeToX('06:30', 800) * 100) / 100, 264.17, 'timeToX parses bare HH:mm');
 
-  assert.equal(kmToY(0, 0, 320, 400), 360, 'min km sits in the bottom gutter');
+  assert.equal(kmToY(0, 0, 320, 400), 345, 'min km sits in the 55px bottom gutter');
   assert.equal(kmToY(320, 0, 320, 400), 40, 'max km sits in the top gutter');
-  assert.equal(kmToY(160, 0, 320, 400), 200, 'mid-section is mid-canvas');
-  assert.equal(kmToY(100, 100, 100, 400), 360, 'degenerate 0-length section never NaNs');
+  assert.equal(kmToY(160, 0, 320, 400), 192.5, 'mid-section sits mid-canvas');
+  assert.equal(kmToY(100, 100, 100, 400), 345, 'degenerate 0-length section never NaNs');
 
   const t = (extra: Partial<TrainDto>): TrainDto => ({
     trainId: 'T9', trainName: 'T9', priority: 3,
@@ -213,6 +224,11 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
   assert.equal(stats.liveHits.length, 1, 'live marker hit position must be reported for hover');
   assert.equal(stats.liveHits[0].trainId, 'T1');
   assert.equal(Math.round(stats.liveHits[0].x), Math.round(timeToX(450, 800)), 'live marker X interpolates ON its trajectory at the live KM');
+
+  assert.equal(stats.zoneHits.length, 1, 'high-risk asset zone must be reported for click inspection');
+  assert.equal(stats.zoneHits[0].assetId, 'A1');
+  assert.equal(Math.round(stats.zoneHits[0].x), 800 - 28, 'zone badge pins to the right gutter');
+  assert.equal(Math.round(stats.zoneHits[0].y), Math.round(kmToY(100, 0, 320, 400)), 'zone badge sits at the asset chainage height');
 });
 
 test('drawNetworkMap: nodes, risk-tinted corridors', () => {

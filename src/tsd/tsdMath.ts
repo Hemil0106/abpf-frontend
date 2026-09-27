@@ -96,32 +96,40 @@ export function dayWindow(zoom: number, dayMinutes = 1440): { startMin: number; 
 
 /**
  * Maps a time (minutes since midnight) to a canvas X coordinate across the
- * padded horizontal axis (80px left for the KM/Y labels, 40px right). At
- * zoom 1 the whole day fills the drawable span; higher zooms crop the
- * day-centred window so trajectories stay on canvas.
+ * padded horizontal axis (80px left for the KM/Y labels, 40px right). The day
+ * always spans the full width; horizontal zoom is applied upstream by growing
+ * the canvas width (scroll container), so each minute keeps a constant pixel
+ * pitch per zoom level and the shifted window just scrolls into view.
  */
 export function timeToXCoordinate(
   timeMinutes: number,
   canvasWidth: number,
-  zoom = 1,
+  _zoom = 1,
   paddingLeft = 80,
   paddingRight = 40,
 ): number {
-  const { startMin, endMin } = dayWindow(zoom);
-  const minSpan = Math.max(1e-6, endMin - startMin);
   const clamped = Math.max(0, Math.min(1440, timeMinutes));
   const inner = Math.max(0, canvasWidth - paddingLeft - paddingRight);
-  return paddingLeft + ((clamped - startMin) / minSpan) * inner;
+  return paddingLeft + (clamped / 1440) * inner;
 }
 
 /**
- * Chainage km → canvas Y with a 40px top/bottom gutter so station labels at the
- * section bounds never clip. `maxKm - minKm` is floored at 1 so a degenerate
- * section can never produce NaN/Infinity Y.
+ * Chainage km → canvas Y. `paddingTop` leaves room for the axis label above the
+ * highest KM; `paddingBottom` (55px) is a deep bottom gutter so the explicit
+ * hourly time labels never collide with the station name at the section's
+ * lower bound. `maxKm - minKm` is floored at 1 so a degenerate section can
+ * never produce NaN/Infinity Y.
  */
-export function kmToY(km: number, minKm: number, maxKm: number, height: number): number {
+export function kmToY(
+  km: number,
+  minKm: number,
+  maxKm: number,
+  height: number,
+  paddingTop = 40,
+  paddingBottom = 55,
+): number {
   const ratio = (km - minKm) / Math.max(1, maxKm - minKm);
-  return height - 40 - ratio * (height - 80);
+  return height - paddingBottom - ratio * (height - paddingTop - paddingBottom);
 }
 
 export interface DayScale {
@@ -135,10 +143,11 @@ export function buildDayScale(opts: {
   endKm: number;
   zoom?: number;
 }): DayScale {
-  const { startMin, endMin } = dayWindow(opts.zoom ?? 1);
   return {
     y: (km) => kmToY(km, opts.startKm, opts.endKm, opts.height),
-    inView: (min) => min >= startMin && min <= endMin,
+    // Scrollable whole-day canvas: every minute is always reachable by
+    // horizontal scrolling, so nothing is culled.
+    inView: () => true,
   };
 }
 
@@ -191,6 +200,33 @@ export function parseTimeToMinutes(timeStr: string | number | Date): number {
 export interface StopPoint {
   timeMins: number;
   km: number;
+}
+
+/**
+ * Deterministic live chainage locked onto the trajectory: find the active
+ * schedule segment `[stopA, stopB]` covering `nowMin`, interpolate
+ * `t = (nowMin - stopA.timeMins) / (stopB.timeMins - stopA.timeMins)` clamped
+ * to [0,1], then `liveKm = stopA.km + t * (stopB.km - stopA.km)`. Purely a
+ * function of the clock and the schedule — no noise, no memory — so the marker
+ * glides along the string and can never oscillate.
+ */
+export function liveKmAtTime(stops: readonly StopPoint[], nowMin: number): number {
+  if (stops.length === 0) return 0;
+  if (stops.length === 1) return stops[0].km;
+  const first = stops[0];
+  const last = stops[stops.length - 1];
+  if (nowMin <= first.timeMins) return first.km;
+  if (nowMin >= last.timeMins) return last.km;
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i];
+    const b = stops[i + 1];
+    if (nowMin >= a.timeMins && nowMin <= b.timeMins) {
+      const span = Math.max(1e-9, b.timeMins - a.timeMins);
+      const t = Math.max(0, Math.min(1, (nowMin - a.timeMins) / span));
+      return a.km + t * (b.km - a.km);
+    }
+  }
+  return last.km;
 }
 
 function stopsFromPayload(train: TrainDto): Array<{

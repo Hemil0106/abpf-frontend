@@ -47,6 +47,13 @@ export interface LiveHit {
   y: number;
 }
 
+/** Critical asset-zone warning badge position, in CSS pixels (for hit testing). */
+export interface ZoneHit {
+  assetId: string;
+  x: number;
+  y: number;
+}
+
 export interface RenderStats {
   stations: number;
   trains: number;
@@ -56,9 +63,26 @@ export interface RenderStats {
   heatSlices: number;
   blockHits: BlockHit[];
   liveHits: LiveHit[];
+  zoneHits: ZoneHit[];
 }
 
 const HEAT_SLICES = 40;
+
+/** Failure risk above which an asset becomes a rendered "Critical Zone". */
+const CRITICAL_ZONE_THRESHOLD = 0.6;
+
+/** Pulsing hexagon outline path around (cx, cy). */
+function fillHexagon(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = (Math.PI / 3) * i - Math.PI / 6;
+    const px = cx + r * Math.cos(a);
+    const py = cy + r * Math.sin(a);
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
 
 /** Chainage gap below which a live marker sits on a station line and its label must flip below it. */
 const LABEL_FLIP_KM = 12;
@@ -157,6 +181,7 @@ export function drawTimeSpace(
     heatSlices: 0,
     blockHits: [],
     liveHits: [],
+    zoneHits: [],
   };
 
   ctx.font = '11px ui-monospace, monospace';
@@ -180,17 +205,17 @@ export function drawTimeSpace(
     const gx = xOf(hour * 60);
     ctx.beginPath();
     ctx.moveTo(gx, 20);
-    ctx.lineTo(gx, height - 40);
+    ctx.lineTo(gx, height - 55);
     ctx.stroke();
   }
   ctx.restore();
 
-  // Explicit X-axis time labels (every 2 hours) in the bottom padding.
+  // Explicit X-axis time labels (every 2 hours) in the 55px bottom gutter.
   ctx.fillStyle = '#94a3b8';
-  ctx.font = '11px monospace';
+  ctx.font = '12px monospace';
   for (let hour = 0; hour <= 24; hour += 2) {
     const label = `${String(hour).padStart(2, '0')}:00`;
-    ctx.fillText(label, xOf(hour * 60) - 15, height - 12);
+    ctx.fillText(label, xOf(hour * 60) - 15, height - 18);
   }
 
   // Station labels along the Y (KM) axis.
@@ -245,6 +270,35 @@ export function drawTimeSpace(
       const yBottom = yOf(centerKm + band / 2);
       ctx.fillRect(0, yBottom, width, Math.max(1, yTop - yBottom));
       stats.heatSlices += 1;
+    }
+  }
+
+  // Critical Zone badges: pulsing amber/red hexagon per asset with
+  // failureRiskScore above the threshold, pinned to its chainage height in the
+  // right gutter (clear of the KM/time labels). Each badge is a click target.
+  if (opts.assets.length > 0) {
+    const badgeWave = Math.abs(Math.sin(Date.now() / 350));
+    for (const asset of opts.assets) {
+      if (asset.failureRiskScore <= CRITICAL_ZONE_THRESHOLD) continue;
+      if (asset.locationKm < minKm || asset.locationKm > maxKm) continue;
+      const critical = asset.failureRiskScore >= 0.8;
+      const cx = width - 28;
+      const cy = yOf(asset.locationKm);
+      const r = 8 + 3 * badgeWave;
+      fillHexagon(ctx, cx, cy, r);
+      ctx.fillStyle = critical ? 'rgba(220, 38, 38, 0.3)' : 'rgba(245, 158, 11, 0.25)';
+      ctx.fill();
+      ctx.strokeStyle = critical ? '#dc2626' : '#f59e0b';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = critical ? '#fecaca' : '#fde68a';
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('!', cx, cy);
+      ctx.textAlign = 'start';
+      ctx.textBaseline = 'alphabetic';
+      stats.zoneHits.push({ assetId: asset.assetId, x: cx, y: cy });
     }
   }
 

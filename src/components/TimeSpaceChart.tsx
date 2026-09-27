@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AssetDto, BlockDto, SectionDto, StationDto, TrainDto, TrainLive } from '../types';
-import { drawTimeSpace, type BlockHit, type LiveHit } from '../tsd/renderTimeSpace';
-import { parseTimeToMinutes, trainDelayMins, trainStops } from '../tsd/tsdMath';
+import { drawTimeSpace, type BlockHit, type LiveHit, type ZoneHit } from '../tsd/renderTimeSpace';
+import { liveKmAtTime, parseTimeToMinutes, trainDelayMins, trainStops } from '../tsd/tsdMath';
 
 interface TimeSpaceChartProps {
   startKm: number;
@@ -15,6 +15,7 @@ interface TimeSpaceChartProps {
 }
 
 type HoverItem = { type: 'block' | 'train'; id: string };
+type InspectorItem = { type: 'block' | 'train' | 'zone'; id: string };
 
 function hhmm(mins: number): string {
   const m = Math.round(Math.max(0, mins));
@@ -49,8 +50,7 @@ export function TimeSpaceChart({
   const wrapRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef(live);
   liveRef.current = live;
-  const hitsRef = useRef<{ blocks: BlockHit[]; live: LiveHit[] }>({ blocks: [], live: [] });
-  const glidesRef = useRef<Record<string, { km: number; speedKmh: number }>>({});
+  const hitsRef = useRef<{ blocks: BlockHit[]; live: LiveHit[]; zones: ZoneHit[] }>({ blocks: [], live: [], zones: [] });
 
   const [zoom, setZoom] = useState(1);
   const [showHeatmap, setShowHeatmap] = useState(false);
@@ -58,6 +58,7 @@ export function TimeSpaceChart({
   const [conflictsOnly, setConflictsOnly] = useState(false);
   const [hover, setHover] = useState<HoverItem | null>(null);
   const [mouse, setMouse] = useState<{ x: number; y: number } | null>(null);
+  const [inspector, setInspector] = useState<InspectorItem | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -68,42 +69,36 @@ export function TimeSpaceChart({
       const dpr = window.devicePixelRatio || 1;
       const rect = wrap.getBoundingClientRect();
       if (rect.width === 0) return;
-      canvas.width = Math.round(rect.width * dpr);
+      // Horizontal zoom grows the canvas width so the day keeps a constant
+      // pixel pitch and the window scrolls; 55px bottom gutter holds the
+      // explicit time labels.
+      const zoomWidth = Math.max(rect.width, rect.width * zoom);
+      canvas.width = Math.round(zoomWidth * dpr);
       canvas.height = Math.round(650 * dpr);
+      canvas.style.width = `${zoomWidth}px`;
       canvas.style.height = '650px';
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      console.log('Canvas rendering', { trains: trains.length, section: activeSection });
 
-      // Smooth telemetry motion: lerp each train's KM toward its target every
-      // frame (0.05 factor per spec); when the last tick is stale, fall back to
-      // a steady speed-based advance along the section so markers glide instead
-      // of freezing or jumping across vertical lines.
+      // Deterministic trajectory-locked positions: live chainage is a pure
+      // function of the wall clock and the schedule (liveKmAtTime interpolates
+      // the active [stopA → stopB] segment), so markers glide along their own
+      // strings with zero noise and never oscillate.
       const nowMin = parseTimeToMinutes(new Date());
-      const nextSlides: Record<string, TrainLive> = {};
-      const nextGlides: Record<string, { km: number; speedKmh: number }> = {};
+      const slides: Record<string, TrainLive> = {};
       for (const [trainId, target] of Object.entries(liveRef.current)) {
         const train = trains.find((t) => t.trainId === trainId);
         const speedKmh = target.speedKmh > 0 ? target.speedKmh : categorySpeed(train);
-        const stale = Math.abs(nowMin - target.mins) > 5;
-        let targetKm = target.km;
-        if (stale && train) {
-          const origin = trainStops(train, stations, startKm, endKm)[0];
-          const hours = (nowMin - origin.timeMins) / 60;
-          const lo = Math.min(startKm, endKm);
-          const hi = Math.max(startKm, endKm);
-          targetKm = Math.max(lo, Math.min(hi, origin.km + hours * speedKmh));
-        }
-        const prev = glidesRef.current[trainId];
-        const km = prev ? prev.km + (targetKm - prev.km) * 0.05 : targetKm;
-        nextGlides[trainId] = { km, speedKmh };
-        nextSlides[trainId] = { km, mins: target.mins, speedKmh };
+        slides[trainId] = {
+          km: train ? liveKmAtTime(trainStops(train, stations, startKm, endKm), nowMin) : target.km,
+          mins: target.mins,
+          speedKmh,
+        };
       }
-      glidesRef.current = nextGlides;
 
       const stats = drawTimeSpace(ctx, {
-        width: rect.width,
+        width: zoomWidth,
         height: 650,
         startKm,
         endKm,
@@ -111,14 +106,14 @@ export function TimeSpaceChart({
         trains,
         blocks,
         assets,
-        live: nextSlides,
+        live: slides,
         zoom,
         showHeatmap,
         showBlocks,
         conflictsOnly,
         cursorMin: nowMin,
       });
-      hitsRef.current = { blocks: stats.blockHits, live: stats.liveHits };
+      hitsRef.current = { blocks: stats.blockHits, live: stats.liveHits, zones: stats.zoneHits };
     };
 
     render();
@@ -160,6 +155,33 @@ export function TimeSpaceChart({
   const handleMouseLeave = () => {
     setHover(null);
     setMouse(null);
+  };
+
+  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.nativeEvent.offsetX ?? e.clientX - rect.left;
+    const y = e.nativeEvent.offsetY ?? e.clientY - rect.top;
+    const { blocks, live: liveHits, zones } = hitsRef.current;
+    for (const l of liveHits) {
+      if (Math.hypot(x - l.x, y - l.y) <= 8) {
+        setInspector({ type: 'train', id: l.trainId });
+        return;
+      }
+    }
+    for (const z of zones) {
+      if (Math.hypot(x - z.x, y - z.y) <= 14) {
+        setInspector({ type: 'zone', id: z.assetId });
+        return;
+      }
+    }
+    for (const b of blocks) {
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+        setInspector({ type: 'block', id: b.blockId });
+        return;
+      }
+    }
   };
 
   const stationOf = (km: number): { stationName: string; km: number } =>
@@ -223,8 +245,75 @@ export function TimeSpaceChart({
     );
   })();
 
+  const inspectorCard = (() => {
+    if (!inspector) return null;
+    const Row = ({ k, v, tone }: { k: string; v: React.ReactNode; tone?: string }) => (
+      <div className="flex items-baseline justify-between gap-2 text-[11px]">
+        <span className="shrink-0 text-slate-400">{k}</span>
+        <span className={tone ?? 'font-medium text-slate-200'}>{v}</span>
+      </div>
+    );
+    if (inspector.type === 'train') {
+      const train = trains.find((t) => t.trainId === inspector.id);
+      if (!train) return null;
+      const pos = liveRef.current[train.trainId];
+      const delay = trainDelayMins(train, startKm, endKm, parseTimeToMinutes(new Date()), pos?.km);
+      return (
+        <div className="space-y-1.5">
+          <Row k="Type" v={`${train.type ?? 'PASSENGER'} Train`} />
+          <Row k="ID" v={`${train.trainId} · ${train.trainName}`} />
+          <Row k="Route" v={`${train.originStation} → ${train.destinationStation}`} />
+          <Row k="Chainage" v={`${stationOf(pos?.km ?? 0).stationName} (${Math.round(pos?.km ?? 0)} KM)`} />
+          <Row k="Speed" v={`${(pos?.speedKmh ?? 0).toFixed(0)} km/h`} />
+          <Row k="Delay" v={delay > 0 ? `+${delay} min` : 'On time'} tone={delay > 0 ? 'text-amber-300' : 'text-emerald-400'} />
+          <Row k="Priority" v={String(train.priority)} />
+          <Row k="TSR" v="None reported" tone="text-slate-400" />
+          <Row k="Action" v="Monitor headway" tone="text-sky-300" />
+        </div>
+      );
+    }
+    if (inspector.type === 'zone') {
+      const asset = assets.find((a) => a.assetId === inspector.id);
+      if (!asset) return null;
+      const critical = asset.failureRiskScore >= 0.8;
+      return (
+        <div className="space-y-1.5">
+          <Row k="Type" v="Asset Critical Zone" />
+          <Row k="ID" v={`${asset.assetType} · ${asset.assetId}`} />
+          <Row k="Location" v={`${activeSection?.sectionName ?? 'Section'} · ${stationOf(asset.locationKm).stationName}`} />
+          <Row k="Chainage" v={`${Math.round(asset.locationKm)} KM`} />
+          <Row k="Risk R_i" v={asset.failureRiskScore.toFixed(2)} tone={critical ? 'text-red-400' : 'text-amber-300'} />
+          <Row k="P(F|t)" v={asset.failureProbability.toFixed(2)} tone={critical ? 'text-red-400' : 'text-amber-300'} />
+          <Row k="RUL" v={`${asset.rulDays} days`} />
+          <Row k="Cause" v={critical ? 'High failure likelihood, imminent' : 'Elevated failure likelihood'} />
+          <Row k="TSR" v={critical ? 'TSR 30 km/h recommended' : 'No TSR'} tone={critical ? 'text-red-400' : 'text-slate-400'} />
+          <Row k="Action" v="Dispatch maintenance inspection" tone="text-sky-300" />
+        </div>
+      );
+    }
+    const win = blocks.find((b) => b.blockId === inspector.id);
+    if (!win) return null;
+    const startMin = parseTimeToMinutes(win.startTime);
+    const endMin = parseTimeToMinutes(win.endTime);
+    return (
+      <div className="space-y-1.5">
+        <Row k="Type" v="Maintenance Block" tone="text-emerald-300" />
+        <Row k="ID" v={win.blockId} />
+        <Row k="Section" v={win.sectionId} />
+        <Row k="Location" v={`${stationOf(win.startKm).stationName} → ${stationOf(win.endKm).stationName}`} />
+        <Row k="Window" v={`${hhmm(startMin)} → ${hhmm(endMin)}`} />
+        <Row k="Duration" v={`${win.requiredDurationMinutes} min`} />
+        <Row k="Priority" v={String(win.blockPriority)} />
+        <Row k="Cause" v="Planned maintenance possession" />
+        <Row k="TSR" v="Speed restricted inside window" tone="text-amber-300" />
+        <Row k="Action" v="Protect possession; reschedule trains" tone="text-emerald-300" />
+      </div>
+    );
+  })();
+
+  const scrollLeft = wrapRef.current?.scrollLeft ?? 0;
   const wrapWidth = wrapRef.current?.clientWidth ?? 0;
-  const tipLeft = mouse ? Math.max(8, Math.min(mouse.x + 12, wrapWidth - 248)) : 0;
+  const tipLeft = mouse ? Math.max(8, Math.min(mouse.x + 12 - scrollLeft, wrapWidth - 248)) : 0;
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -279,14 +368,20 @@ export function TimeSpaceChart({
           <LegendDot color="#eab308" label="Freight / Local" />
           <LegendDot color="#4CAF50" label="Active Block" />
           <LegendDot color="#E53935" label="Conflict Point" />
+          <LegendDot color="#f59e0b" label="Critical Zone" />
         </div>
+        <span className="ml-auto text-[10px] text-slate-500">Click a train / block / zone to inspect</span>
       </div>
-      <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-800 bg-slate-950">
+      <div
+        ref={wrapRef}
+        className="relative min-h-0 flex-1 overflow-x-auto overflow-y-hidden rounded-lg border border-slate-800 bg-slate-950"
+      >
         <canvas
           ref={canvasRef}
-          className={`block h-full w-full ${hover ? 'cursor-pointer' : 'cursor-default'}`}
+          className={`block ${hover ? 'cursor-pointer' : 'cursor-default'}`}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
+          onClick={handleClick}
         />
         {mouse && hover && tooltip && (
           <div
@@ -294,6 +389,30 @@ export function TimeSpaceChart({
             style={{ left: tipLeft, top: mouse.y + 12 }}
           >
             {tooltip}
+          </div>
+        )}
+        {inspector && inspectorCard && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/50" onClick={() => setInspector(null)}>
+            <div
+              className="w-80 rounded-xl border border-slate-700 bg-[#1E2638] p-4 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wider text-[#E0E0E0]">
+                  Inspector · {inspector.type}
+                </span>
+                <button
+                  className="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-white"
+                  onClick={() => setInspector(null)}
+                >
+                  ✕
+                </button>
+              </div>
+              {inspectorCard}
+              <div className="mt-3 border-t border-[#2A3550] pt-2 text-[10px] text-slate-500">
+                Click outside to close
+              </div>
+            </div>
           </div>
         )}
       </div>
