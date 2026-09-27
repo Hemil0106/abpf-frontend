@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AssetDto, BlockDto, SectionDto, StationDto, TrainDto, TrainLive } from '../types';
 import { drawTimeSpace, type BlockHit, type LiveHit, type ZoneHit } from '../tsd/renderTimeSpace';
-import { parseTimeToMinutes, trainDelayMins } from '../tsd/tsdMath';
+import { parseTimeToMinutes, trainDelayMins, trajectoryPoint, trainStops, type TrajectoryPoint } from '../tsd/tsdMath';
 
 interface TimeSpaceChartProps {
   startKm: number;
@@ -51,6 +51,9 @@ export function TimeSpaceChart({
   const liveRef = useRef(live);
   liveRef.current = live;
   const hitsRef = useRef<{ blocks: BlockHit[]; live: LiveHit[]; zones: ZoneHit[] }>({ blocks: [], live: [], zones: [] });
+  const simRef = useRef({ timeMins: 420 });
+  const targetsRef = useRef<Record<string, TrajectoryPoint>>({});
+  const markersRef = useRef<Record<string, TrajectoryPoint>>({});
 
   const [zoom, setZoom] = useState(1);
   const [showHeatmap, setShowHeatmap] = useState(false);
@@ -65,7 +68,34 @@ export function TimeSpaceChart({
     const wrap = wrapRef.current;
     if (!canvas || !wrap) return;
 
-    const render = () => {
+    let dirty = true;
+    let raf = 0;
+
+    const speedOf = (trainId: string): number => {
+      const train = trains.find((t) => t.trainId === trainId);
+      const telemetry = liveRef.current[trainId];
+      return telemetry && telemetry.speedKmh > 0 ? telemetry.speedKmh : categorySpeed(train);
+    };
+
+    // Markers are bound to each train's OWN sloped trajectory: every 2s the
+    // operational timeline advances +2 sim minutes and each marker's target is
+    // recomputed from its schedule segment (chainage AND clock both derive from
+    // the same progress). A requestAnimationFrame loop lerps rendered X/Y
+    // toward those targets so motion stays smooth between ticks.
+    const recomputeTargets = () => {
+      const t = simRef.current.timeMins;
+      for (const [id, liveTarget] of Object.entries(liveRef.current)) {
+        const train = trains.find((tr) => tr.trainId === id);
+        targetsRef.current[id] = train
+          ? trajectoryPoint(trainStops(train, stations, startKm, endKm), t)
+          : { km: liveTarget.km, timeMins: liveTarget.mins ?? t };
+      }
+      for (const id of Object.keys(targetsRef.current)) {
+        if (!liveRef.current[id]) delete targetsRef.current[id];
+      }
+    };
+
+    const paint = () => {
       const dpr = window.devicePixelRatio || 1;
       const rect = wrap.getBoundingClientRect();
       if (rect.width === 0) return;
@@ -81,14 +111,13 @@ export function TimeSpaceChart({
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // Live markers are drawn at the current-time column using each train's
-      // reported chainage (desktop mirror), so positions pass through raw.
-      const nowMin = parseTimeToMinutes(new Date());
+      // Pass the currently-lerped (km, mins) pair straight through: mins pins
+      // the marker to its schedule time on the X axis, km to chainage on Y, so
+      // the dot rides its own string instead of a wall-clock column.
       const slides: Record<string, TrainLive> = {};
-      for (const [trainId, target] of Object.entries(liveRef.current)) {
-        const train = trains.find((t) => t.trainId === trainId);
-        const speedKmh = target.speedKmh > 0 ? target.speedKmh : categorySpeed(train);
-        slides[trainId] = { km: target.km, mins: target.mins, speedKmh };
+      for (const [trainId, t] of Object.entries(targetsRef.current)) {
+        const m = markersRef.current[trainId] ?? t;
+        slides[trainId] = { km: m.km, mins: m.timeMins, speedKmh: speedOf(trainId) };
       }
 
       const stats = drawTimeSpace(ctx, {
@@ -105,16 +134,42 @@ export function TimeSpaceChart({
         showHeatmap,
         showBlocks,
         conflictsOnly,
-        cursorMin: nowMin,
+        cursorMin: parseTimeToMinutes(new Date()),
       });
       hitsRef.current = { blocks: stats.blockHits, live: stats.liveHits, zones: stats.zoneHits };
     };
 
-    render();
-    const timer = window.setInterval(render, 1000);
-    const observer = new ResizeObserver(render);
+    const frame = () => {
+      raf = requestAnimationFrame(frame);
+      let moved = false;
+      for (const [id, t] of Object.entries(targetsRef.current)) {
+        const prev = markersRef.current[id] ?? t;
+        const km = prev.km + (t.km - prev.km) * 0.08;
+        const timeMins = prev.timeMins + (t.timeMins - prev.timeMins) * 0.08;
+        if (Math.abs(km - prev.km) > 0.02 || Math.abs(timeMins - prev.timeMins) > 0.02) moved = true;
+        markersRef.current[id] = { km, timeMins };
+      }
+      if (moved || dirty) {
+        dirty = false;
+        paint();
+      }
+    };
+
+    recomputeTargets();
+    raf = requestAnimationFrame(frame);
+
+    // 2-second tick: advance the operational timeline by +2 sim minutes and
+    // recompute every marker target from its current schedule segment.
+    const timer = window.setInterval(() => {
+      simRef.current.timeMins = (simRef.current.timeMins + 2) % 1440;
+      recomputeTargets();
+      dirty = true;
+    }, 2000);
+
+    const observer = new ResizeObserver(paint);
     observer.observe(wrap);
     return () => {
+      cancelAnimationFrame(raf);
       window.clearInterval(timer);
       observer.disconnect();
     };

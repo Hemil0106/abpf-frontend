@@ -369,30 +369,38 @@ export function drawTimeSpace(
     }
   }
 
-  // Live train markers (desktop mirror): glowing amber dot on the current-time
-  // column at each train's reported chainage, id label beside the marker.
-  const nowX = xOf(opts.cursorMin);
+  // Live train markers: glowing amber dot pinned to each train's own sloped
+  // trajectory — X follows the interpolated schedule time (pos.mins), Y the
+  // matching chainage — never the wall-clock column. The id label rides in a
+  // small dark badge offset (+8, -4) so it clears nearby station marks.
   for (const [trainId, pos] of Object.entries(opts.live)) {
     if (pos.km < minKm || pos.km > maxKm) continue;
+    const mx = xOf(pos.mins ?? opts.cursorMin);
     const my = yOf(pos.km);
     ctx.fillStyle = hexA(ACCENT_AMBER, 60 / 255);
     ctx.beginPath();
-    ctx.arc(nowX, my, 9, 0, Math.PI * 2);
+    ctx.arc(mx, my, 9, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = ACCENT_AMBER;
     ctx.beginPath();
-    ctx.arc(nowX, my, 5, 0, Math.PI * 2);
+    ctx.arc(mx, my, 5, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#0b1220';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(nowX, my, 5, 0, Math.PI * 2);
+    ctx.arc(mx, my, 5, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.fillStyle = ACCENT_AMBER;
-    ctx.font = 'bold 9px monospace';
-    ctx.fillText(trainId, nowX + 10, my + 3);
+    ctx.font = '9px monospace';
+    const label = trainId;
+    const textW = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(25, 33, 48, 0.86)';
+    ctx.beginPath();
+    ctx.roundRect(mx + 8 - 3, my - 4 - 9, textW + 6, 12, 6);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(label, mx + 8, my - 4);
     stats.live += 1;
-    stats.liveHits.push({ trainId, x: nowX, y: my });
+    stats.liveHits.push({ trainId, x: mx, y: my });
   }
 
   return stats;

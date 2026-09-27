@@ -16,6 +16,7 @@ import {
   trainDelayMins,
   trainSegment,
   trainStops,
+  trajectoryPoint,
 } from '../src/tsd/tsdMath';
 import { mockCtx } from './helpers';
 import { drawTimeSpace } from '../src/tsd/renderTimeSpace';
@@ -97,6 +98,11 @@ test('tsdMath: parse time inputs, full-width X mapping, day window, segments, de
   assert.equal(liveKmAtTime(segmentStops, 450), 120, 't = (450-360)/120 interpolates km between stops');
   assert.equal(liveKmAtTime(segmentStops, 480), 160, 'schedule mid-stop pins the exact chainage');
   assert.equal(liveKmAtTime(segmentStops, 700), 320, 'clamped to the destination after arrival');
+
+  assert.deepEqual(trajectoryPoint(segmentStops, 450), { km: 120, timeMins: 450 }, 'km and clock both interpolate by the same progress');
+  assert.deepEqual(trajectoryPoint(segmentStops, 360), { km: 0, timeMins: 360 }, 'origin pinned before departure');
+  assert.deepEqual(trajectoryPoint(segmentStops, 700), { km: 320, timeMins: 600 }, 'destination pinned after arrival');
+  assert.deepEqual(trajectoryPoint([], 500), { km: 0, timeMins: 500 }, 'empty schedule degrades to a null marker');
 });
 
 test('tsdMath: robust stop parsing, X/Y converters, degenerate-section guards', () => {

@@ -202,31 +202,49 @@ export interface StopPoint {
   km: number;
 }
 
+export interface TrajectoryPoint {
+  km: number;
+  timeMins: number;
+}
+
 /**
- * Deterministic live chainage locked onto the trajectory: find the active
- * schedule segment `[stopA, stopB]` covering `nowMin`, interpolate
- * `t = (nowMin - stopA.timeMins) / (stopB.timeMins - stopA.timeMins)` clamped
- * to [0,1], then `liveKm = stopA.km + t * (stopB.km - stopA.km)`. Purely a
- * function of the clock and the schedule — no noise, no memory — so the marker
- * glides along the string and can never oscillate.
+ * Point strictly locked onto a train's schedule polyline at `timeMins`: find
+ * the active segment [stopA, stopB], progress = (timeMins − stopA.timeMins) /
+ * (stopB.timeMins − stopA.timeMins) clamped to [0,1], then interpolate BOTH
+ * chainage and clock time by the same progress so (km, timeMins) always lies
+ * exactly on the sloped string. Purely a function of the inputs — no noise,
+ * no memory — so markers can never slip off their line or oscillate.
  */
-export function liveKmAtTime(stops: readonly StopPoint[], nowMin: number): number {
-  if (stops.length === 0) return 0;
-  if (stops.length === 1) return stops[0].km;
+export function trajectoryPoint(stops: readonly StopPoint[], timeMins: number): TrajectoryPoint {
+  if (stops.length === 0) return { km: 0, timeMins };
+  if (stops.length === 1) return { km: stops[0].km, timeMins: stops[0].timeMins };
   const first = stops[0];
   const last = stops[stops.length - 1];
-  if (nowMin <= first.timeMins) return first.km;
-  if (nowMin >= last.timeMins) return last.km;
+  if (timeMins <= first.timeMins) return { km: first.km, timeMins: first.timeMins };
+  if (timeMins >= last.timeMins) return { km: last.km, timeMins: last.timeMins };
   for (let i = 0; i < stops.length - 1; i++) {
     const a = stops[i];
     const b = stops[i + 1];
-    if (nowMin >= a.timeMins && nowMin <= b.timeMins) {
+    if (timeMins >= a.timeMins && timeMins <= b.timeMins) {
       const span = Math.max(1e-9, b.timeMins - a.timeMins);
-      const t = Math.max(0, Math.min(1, (nowMin - a.timeMins) / span));
-      return a.km + t * (b.km - a.km);
+      const progress = Math.max(0, Math.min(1, (timeMins - a.timeMins) / span));
+      return {
+        km: a.km + progress * (b.km - a.km),
+        timeMins: a.timeMins + progress * (b.timeMins - a.timeMins),
+      };
     }
   }
-  return last.km;
+  return { km: last.km, timeMins: last.timeMins };
+}
+
+/**
+ * Deterministic live chainage locked onto the trajectory: the km half of
+ * `trajectoryPoint`. Purely a function of the clock and the schedule — no
+ * noise, no memory — so the marker glides along the string and can never
+ * oscillate.
+ */
+export function liveKmAtTime(stops: readonly StopPoint[], nowMin: number): number {
+  return trajectoryPoint(stops, nowMin).km;
 }
 
 function stopsFromPayload(train: TrainDto): Array<{
