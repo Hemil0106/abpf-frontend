@@ -16,6 +16,7 @@ import {
   trainDelayMins,
   trainSegment,
   trainStops,
+  trajectoryLive,
   trajectoryPoint,
 } from '../src/tsd/tsdMath';
 import { mockCtx } from './helpers';
@@ -103,6 +104,11 @@ test('tsdMath: parse time inputs, full-width X mapping, day window, segments, de
   assert.deepEqual(trajectoryPoint(segmentStops, 360), { km: 0, timeMins: 360 }, 'origin pinned before departure');
   assert.deepEqual(trajectoryPoint(segmentStops, 700), { km: 320, timeMins: 600 }, 'destination pinned after arrival');
   assert.deepEqual(trajectoryPoint([], 500), { km: 0, timeMins: 500 }, 'empty schedule degrades to a null marker');
+
+  assert.equal(trajectoryLive(segmentStops, 450)?.km, 120, 'trajectoryLock: mid-run point on the string');
+  assert.equal(trajectoryLive(segmentStops, 359), null, 'trajectoryLock: before departure draws NO marker');
+  assert.equal(trajectoryLive(segmentStops, 601), null, 'trajectoryLock: after arrival draws NO marker');
+  assert.equal(trajectoryLive([], 500), null, 'trajectoryLock: degenerated schedule draws NO marker');
 });
 
 test('tsdMath: robust stop parsing, X/Y converters, degenerate-section guards', () => {

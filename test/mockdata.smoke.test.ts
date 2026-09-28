@@ -65,6 +65,46 @@ test('mockData: authentic per-zone rosters with strict parity and zero cross-zon
   ]);
 });
 
+const toMins = (time: string): number => {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+};
+
+test('mockData: class-speed slopes diverge and departures never collide', () => {
+  // Steepness: the 0→263 KM corridor takes ~147 / ~237 / ~379 sim minutes for
+  // EXPRESS / SUPERFAST / FREIGHT — visibly divergent string slopes. A 167 KM
+  // leg is ~94 / ~150 / ~240 minutes exactly as the roster spec demands.
+  const wr = trainsForDivision('WR_MUMBAI');
+  const depOf = (t: TrainDto) => toMins(String(t.schedule![0].time));
+  const runMins = (t: TrainDto, toKm: number): number => {
+    const s = t.schedule!;
+    const dep = toMins(String(s[0].time));
+    const arr = toMins(String(s[s.length - 1].time));
+    const spanKm = Math.abs(s[s.length - 1].km! - s[0].km!);
+    return Math.round(((arr - dep) * toKm) / spanKm);
+  };
+
+  const tejas = wr.find((t) => t.trainId === '12951')!; // EXPRESS
+  const sf = wr.find((t) => t.trainId === '22901')!; // SUPERFAST
+  const rake = wr.find((t) => t.trainId === 'FR-001')!; // FREIGHT
+  assert.equal(runMins(tejas, 263), Math.round(263 * 0.56), 'express 167 KM ≈ 94 min (STEEP slope)');
+  assert.equal(runMins(sf, 263), Math.round(263 * 0.9), 'superfast 167 KM ≈ 150 min (MEDIUM slope)');
+  assert.equal(runMins(rake, 263), Math.round(263 * 1.44), 'DFC freight 167 KM ≈ 240 min (SHALLOW slope)');
+
+  // Every rail pair must have a unique departure timestamp within its division
+  // — no trains share a departure unless it is a planned parallel move (none here).
+  for (const [div, roster] of [
+    ['CR_MUMBAI', 'CR'],
+    ['WR_MUMBAI', 'WR'],
+    ['NWR_JAIPUR', 'NWR'],
+  ] as const) {
+    const list = trainsForDivision(div);
+    const deps = list.map(depOf);
+    assert.equal(new Set(deps).size, deps.length, `${roster} departures must all be distinct`);
+    assert.equal(list.length, new Set(list.map((t) => t.trainId)).size, `${roster} train ids unique`);
+  }
+});
+
 test('mockData: division id matching and schedule reversal under enforced parity', () => {
   assert.ok(trainsForDivision('WR-MMCT-01').length > 0, 'zone-prefix ids (legacy backend) still resolve to WR');
   assert.ok(trainsForDivision('cr_mumbai').length > 0, 'derives cleanly and matches on upserted zones');

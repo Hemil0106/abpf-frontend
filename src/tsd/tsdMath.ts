@@ -247,6 +247,23 @@ export function liveKmAtTime(stops: readonly StopPoint[], nowMin: number): numbe
   return trajectoryPoint(stops, nowMin).km;
 }
 
+/**
+ * Strict pointer trajectory-locking for a live marker: returns the point ONLY
+ * while the sim clock is inside the run window [departure, arrival]. Before
+ * departure or after arrival it returns null, so a not-yet-started or
+ * completed train never leaves a stray marker on the chart.
+ */
+export function trajectoryLive(
+  stops: readonly StopPoint[],
+  timeMins: number,
+): TrajectoryPoint | null {
+  if (stops.length < 2) return null;
+  const first = stops[0].timeMins;
+  const last = stops[stops.length - 1].timeMins;
+  if (last <= first || timeMins < first || timeMins > last) return null;
+  return trajectoryPoint(stops, timeMins);
+}
+
 function stopsFromPayload(train: TrainDto): Array<{
   time?: string | number;
   km?: number;

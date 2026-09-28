@@ -107,8 +107,17 @@ const TOP_PAD = 40;
 const BOTTOM_PAD = 70;
 const RIGHT_PAD = 40;
 
-/** Train string color (dual lane): high priority → bright sky blue, else yellow. */
-const colorOf = (train: TrainDto) => (train.priority <= 2 ? UP_BLUE : DOWN_YELLOW);
+/** Train string color: DFC freight stays amber, high-priority express bright sky blue, else yellow. */
+const colorOf = (train: TrainDto) =>
+  train.type === 'FREIGHT' || train.priority > 2 ? DOWN_YELLOW : UP_BLUE;
+
+/**
+ * Dash pattern: DFC freight rakes are ALWAYS dashed ([8,4]) regardless of lane
+ * so a shallow amber rake reads instantly; DOWN lane strings dash tighter
+ * ([6,4]) per the legend.
+ */
+const dashOf = (train: TrainDto, down: boolean): [number, number] | null =>
+  train.type === 'FREIGHT' ? [8, 4] : down ? [6, 4] : null;
 
 /**
  * Lane direction: an explicit `train.direction` wins when the payload carries
@@ -330,10 +339,11 @@ export function drawTimeSpace(
     if (!points.some((p) => scale.inView(p.timeMins))) continue;
     const color = colorOf(train);
     const down = laneOf(train, points) < 0;
+    const dash = dashOf(train, down);
     const dim = opts.conflictsOnly && !(conflicted.get(train.trainId) ?? false);
     if (dim) {
       ctx.save();
-      if (down) ctx.setLineDash([6, 4]);
+      if (dash) ctx.setLineDash(dash);
       ctx.strokeStyle = hexA(color, 30 / 255);
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -349,7 +359,7 @@ export function drawTimeSpace(
       continue;
     }
     ctx.save();
-    if (down) ctx.setLineDash([6, 4]);
+    if (dash) ctx.setLineDash(dash);
     ctx.strokeStyle = hexA(color, 35 / 255);
     ctx.lineWidth = 7;
     ctx.beginPath();

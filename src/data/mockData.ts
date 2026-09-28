@@ -1,4 +1,4 @@
-import type { StationDto, TrainDto, TrainStop } from '../types';
+import type { StationDto, TrainDto } from '../types';
 
 /**
  * Authentic real-world train catalog per Zone/Division, mirroring Indian
@@ -25,21 +25,43 @@ export const ALL_AUTHENTIC_TRAINS = [
 ] as const;
 export type AuthenticTrainId = (typeof ALL_AUTHENTIC_TRAINS)[number];
 
-/** A running stop: [station, chainage KM, time HH:MM]. */
-type StopDef = readonly [string, number, string];
+/**
+ * Distinct running-speed classes produce visibly divergent string slopes:
+ * Express 110–130 km/h (~0.56 min/km → 167 KM in ≈90 min, STEEP), Superfast/
+ * Mail 75–90 km/h (~0.90 min/km → 167 KM in ≈150 min, MEDIUM), DFC Freight
+ * 40–55 km/h (~1.44 min/km → 167 KM in ≈240 min, SHALLOW).
+ */
+const SPEED_MIN_PER_KM = { EXPRESS: 0.56, SUPERFAST: 0.9, FREIGHT: 1.44 } as const;
+type TrainClass = keyof typeof SPEED_MIN_PER_KM;
 
-const st = ([name, km, time]: StopDef): TrainStop => ({ stationName: name, km, time });
+const hhmm = (mins: number): string => {
+  const m = Math.round(Math.max(0, mins)) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+};
 
-function buildTrain(
+/**
+ * Builds an authentic run: every intermediate stop's arrival is interpolated
+ * from its true chainage at the class cruise speed, so all strings of a class
+ * share one slope and each train's departure stays unique. Runs are authored
+ * city-end-first (ascending chainage); `enforceParity` reverses even (DOWN)
+ * trains so their slope descends.
+ */
+function route(
   trainId: string,
   trainName: string,
   priority: number,
   type: TrainDto['type'],
   originStation: string,
   destinationStation: string,
-  stops: readonly StopDef[],
+  depMins: number,
+  cls: TrainClass,
+  stops: readonly [string, number][],
 ): TrainDto {
-  const schedule = stops.map(st);
+  const schedule = stops.map(([stationName, km]) => ({
+    stationName,
+    km,
+    time: hhmm(depMins + km * SPEED_MIN_PER_KM[cls]),
+  }));
   return {
     trainId,
     trainName,
@@ -49,65 +71,65 @@ function buildTrain(
     destinationStation,
     loopLineRequirement: false,
     schedule,
-    arrivalTime: `${stops[stops.length - 1][2]}:00`,
-    departureTime: `${stops[0][2]}:00`,
+    arrivalTime: `${schedule[schedule.length - 1].time}:00`,
+    departureTime: `${schedule[0].time}:00`,
   };
 }
 
 /** CR (Mumbai CSMT – Pune/Igatpuri/Karjat): Western + Central Ghat routes. */
 const CR_TRAINS: TrainDto[] = [
-  buildTrain('12123', 'Deccan Queen', 1, 'EXPRESS', 'CSMT', 'Pune',
-    [['CSMT', 0, '07:10'], ['Dadar', 9, '07:16'], ['Thane', 34, '07:40'], ['Kalyan', 54, '08:05'], ['Karjat', 100, '08:42']]),
-  buildTrain('12124', 'Deccan Queen', 1, 'EXPRESS', 'Pune', 'CSMT',
-    [['Karjat', 100, '17:30'], ['Kalyan', 54, '18:05'], ['Thane', 34, '18:26'], ['Dadar', 9, '18:49'], ['CSMT', 0, '19:05']]),
-  buildTrain('22221', 'CSMT-NZM Rajdhani Express', 1, 'EXPRESS', 'CSMT', 'Hazrat Nizamuddin',
-    [['CSMT', 0, '16:10'], ['Kalyan', 54, '16:52'], ['Nashik Road', 188, '17:55']]),
-  buildTrain('22222', 'NZM-CSMT Rajdhani Express', 1, 'EXPRESS', 'Hazrat Nizamuddin', 'CSMT',
-    [['Nashik Road', 188, '08:00'], ['Kalyan', 54, '09:02'], ['CSMT', 0, '10:10']]),
-  buildTrain('11057', 'CSMT-Amritsar Express', 3, 'PASSENGER', 'CSMT', 'Amritsar',
-    [['CSMT', 0, '19:00'], ['Dadar', 9, '19:08'], ['Thane', 34, '19:33'], ['Kalyan', 54, '20:00'], ['Kasara', 121, '20:55']]),
-  buildTrain('11058', 'Amritsar-CSMT Express', 3, 'PASSENGER', 'Amritsar', 'CSMT',
-    [['Kasara', 121, '05:10'], ['Kalyan', 54, '06:05'], ['Thane', 34, '06:32'], ['Dadar', 9, '06:57'], ['CSMT', 0, '07:05']]),
-  buildTrain('12137', 'Punjab Mail', 2, 'EXPRESS', 'CSMT', 'Firozpur',
-    [['CSMT', 0, '10:00'], ['Dadar', 9, '10:08'], ['Thane', 34, '10:33'], ['Kalyan', 54, '11:00'], ['Karjat', 100, '11:42'], ['Kasara', 121, '12:10']]),
-  buildTrain('12138', 'Punjab Mail', 2, 'EXPRESS', 'Firozpur', 'CSMT',
-    [['Kasara', 121, '14:20'], ['Karjat', 100, '14:48'], ['Kalyan', 54, '15:30'], ['Thane', 34, '15:56'], ['Dadar', 9, '16:19'], ['CSMT', 0, '16:25']]),
+  route('12123', 'Deccan Queen', 3, 'PASSENGER', 'CSMT', 'Pune', 7 * 60 + 10, 'SUPERFAST',
+    [['CSMT', 0], ['Dadar', 9], ['Thane', 34], ['Kalyan', 54], ['Karjat', 100]]),
+  route('12124', 'Deccan Queen', 3, 'PASSENGER', 'Pune', 'CSMT', 15 * 60 + 21, 'SUPERFAST',
+    [['Karjat', 100], ['Kalyan', 54], ['Thane', 34], ['Dadar', 9], ['CSMT', 0]]),
+  route('22221', 'CSMT-NZM Rajdhani Express', 1, 'EXPRESS', 'CSMT', 'Hazrat Nizamuddin', 16 * 60 + 10, 'EXPRESS',
+    [['CSMT', 0], ['Kalyan', 54], ['Nashik Road', 188]]),
+  route('22222', 'NZM-CSMT Rajdhani Express', 1, 'EXPRESS', 'Hazrat Nizamuddin', 'CSMT', 7 * 60 + 15, 'EXPRESS',
+    [['Nashik Road', 188], ['Kalyan', 54], ['CSMT', 0]]),
+  route('11057', 'CSMT-Amritsar Express', 3, 'PASSENGER', 'CSMT', 'Amritsar', 19 * 60, 'SUPERFAST',
+    [['CSMT', 0], ['Dadar', 9], ['Thane', 34], ['Kalyan', 54], ['Kasara', 121]]),
+  route('11058', 'Amritsar-CSMT Express', 3, 'PASSENGER', 'Amritsar', 'CSMT', 3 * 60, 'SUPERFAST',
+    [['Kasara', 121], ['Kalyan', 54], ['Thane', 34], ['Dadar', 9], ['CSMT', 0]]),
+  route('12137', 'Punjab Mail', 3, 'PASSENGER', 'CSMT', 'Firozpur', 10 * 60, 'SUPERFAST',
+    [['CSMT', 0], ['Dadar', 9], ['Thane', 34], ['Kalyan', 54], ['Karjat', 100], ['Kasara', 121]]),
+  route('12138', 'Punjab Mail', 3, 'PASSENGER', 'Firozpur', 'CSMT', 12 * 60 + 30, 'SUPERFAST',
+    [['Kasara', 121], ['Karjat', 100], ['Kalyan', 54], ['Thane', 34], ['Dadar', 9], ['CSMT', 0]]),
 ];
 
 /** WR (Mumbai – Borivali – Vapi – Surat): Western Dedicated Corridor. */
 const WR_TRAINS: TrainDto[] = [
-  buildTrain('12951', 'Tejas Rajdhani Express', 1, 'EXPRESS', 'MMCT', 'New Delhi',
-    [['MMCT', 0, '17:00'], ['Borivali', 30, '17:26'], ['Vapi', 167, '19:20'], ['Surat', 263, '20:00']]),
-  buildTrain('12952', 'Tejas Rajdhani Express', 1, 'EXPRESS', 'New Delhi', 'MMCT',
-    [['Surat', 263, '08:30'], ['Vapi', 167, '09:10'], ['Borivali', 30, '11:05'], ['MMCT', 0, '11:35']]),
-  buildTrain('12953', 'August Kranti Rajdhani Express', 1, 'EXPRESS', 'MMCT', 'Hazrat Nizamuddin',
-    [['MMCT', 0, '17:35'], ['Borivali', 30, '18:01'], ['Vapi', 167, '19:55'], ['Surat', 263, '20:35']]),
-  buildTrain('12954', 'August Kranti Rajdhani Express', 1, 'EXPRESS', 'Hazrat Nizamuddin', 'MMCT',
-    [['Surat', 263, '07:20'], ['Vapi', 167, '08:00'], ['Borivali', 30, '09:50'], ['MMCT', 0, '10:20']]),
-  buildTrain('22901', 'Bandra Terminus-Udaipur Superfast Express', 2, 'EXPRESS', 'Bandra Terminus', 'Udaipur',
-    [['MMCT', 0, '07:15'], ['Borivali', 30, '07:45'], ['Vapi', 167, '09:55'], ['Surat', 263, '10:45']]),
-  buildTrain('22902', 'Udaipur-Bandra Terminus Superfast Express', 2, 'EXPRESS', 'Udaipur', 'Bandra Terminus',
-    [['Surat', 263, '18:30'], ['Vapi', 167, '19:20'], ['Borivali', 30, '21:25'], ['MMCT', 0, '22:00']]),
-  buildTrain('FR-001', 'Western DFC Container Rake', 4, 'FREIGHT', 'MMCT', 'Surat',
-    [['MMCT', 0, '01:30'], ['Borivali', 30, '02:10'], ['Vapi', 167, '04:40'], ['Surat', 263, '05:40']]),
-  buildTrain('FR-002', 'Western DFC Container Rake', 4, 'FREIGHT', 'Surat', 'MMCT',
-    [['Surat', 263, '14:30'], ['Vapi', 167, '15:30'], ['Borivali', 30, '18:05'], ['MMCT', 0, '18:45']]),
+  route('12951', 'Tejas Rajdhani Express', 1, 'EXPRESS', 'MMCT', 'New Delhi', 17 * 60, 'EXPRESS',
+    [['MMCT', 0], ['Borivali', 30], ['Vapi', 167], ['Surat', 263]]),
+  route('12952', 'Tejas Rajdhani Express', 1, 'EXPRESS', 'New Delhi', 'MMCT', 6 * 60 + 30, 'EXPRESS',
+    [['Surat', 263], ['Vapi', 167], ['Borivali', 30], ['MMCT', 0]]),
+  route('12953', 'August Kranti Rajdhani Express', 1, 'EXPRESS', 'MMCT', 'Hazrat Nizamuddin', 17 * 60 + 35, 'EXPRESS',
+    [['MMCT', 0], ['Borivali', 30], ['Vapi', 167], ['Surat', 263]]),
+  route('12954', 'August Kranti Rajdhani Express', 1, 'EXPRESS', 'Hazrat Nizamuddin', 'MMCT', 5 * 60 + 15, 'EXPRESS',
+    [['Surat', 263], ['Vapi', 167], ['Borivali', 30], ['MMCT', 0]]),
+  route('22901', 'Bandra Terminus-Udaipur Superfast Express', 3, 'PASSENGER', 'Bandra Terminus', 'Udaipur', 7 * 60 + 15, 'SUPERFAST',
+    [['MMCT', 0], ['Borivali', 30], ['Vapi', 167], ['Surat', 263]]),
+  route('22902', 'Udaipur-Bandra Terminus Superfast Express', 3, 'PASSENGER', 'Udaipur', 'Bandra Terminus', 15 * 60, 'SUPERFAST',
+    [['Surat', 263], ['Vapi', 167], ['Borivali', 30], ['MMCT', 0]]),
+  route('FR-001', 'Western DFC Container Rake', 4, 'FREIGHT', 'MMCT', 'Surat', 90, 'FREIGHT',
+    [['MMCT', 0], ['Borivali', 30], ['Vapi', 167], ['Surat', 263]]),
+  route('FR-002', 'Western DFC Container Rake', 4, 'FREIGHT', 'Surat', 'MMCT', 9 * 60, 'FREIGHT',
+    [['Surat', 263], ['Vapi', 167], ['Borivali', 30], ['MMCT', 0]]),
 ];
 
 /** NWR (Jaipur – Phulera – Kishangarh – Ajmer): Jaipur division. */
 const NWR_TRAINS: TrainDto[] = [
-  buildTrain('12981', 'Jaipur-Udaipur Superfast Express', 2, 'EXPRESS', 'Jaipur', 'Udaipur',
-    [['Jaipur', 0, '06:20'], ['Kanakpura', 9, '06:26'], ['Phulera', 55, '06:58'], ['Kishangarh', 105, '07:35'], ['Ajmer', 132, '08:00']]),
-  buildTrain('12982', 'Udaipur-Jaipur Superfast Express', 2, 'EXPRESS', 'Udaipur', 'Jaipur',
-    [['Ajmer', 132, '09:05'], ['Kishangarh', 105, '09:35'], ['Phulera', 55, '10:12'], ['Kanakpura', 9, '10:44'], ['Jaipur', 0, '10:50']]),
-  buildTrain('20977', 'Vande Bharat Express', 1, 'EXPRESS', 'Ajmer', 'Chandigarh',
-    [['Jaipur', 0, '10:30'], ['Kanakpura', 9, '10:36'], ['Phulera', 55, '11:08'], ['Kishangarh', 105, '11:45'], ['Ajmer', 132, '12:10']]),
-  buildTrain('20978', 'Vande Bharat Express', 1, 'EXPRESS', 'Chandigarh', 'Ajmer',
-    [['Ajmer', 132, '15:30'], ['Kishangarh', 105, '15:55'], ['Phulera', 55, '16:32'], ['Kanakpura', 9, '17:04'], ['Jaipur', 0, '17:10']]),
-  buildTrain('12015', 'Ajmer Shatabdi Express', 1, 'EXPRESS', 'New Delhi', 'Ajmer',
-    [['Jaipur', 0, '13:00'], ['Kanakpura', 9, '13:06'], ['Phulera', 55, '13:38'], ['Kishangarh', 105, '14:15'], ['Ajmer', 132, '14:40']]),
-  buildTrain('12016', 'Ajmer Shatabdi Express', 1, 'EXPRESS', 'Ajmer', 'New Delhi',
-    [['Ajmer', 132, '16:40'], ['Kishangarh', 105, '17:05'], ['Phulera', 55, '17:42'], ['Kanakpura', 9, '18:14'], ['Jaipur', 0, '18:20']]),
+  route('12981', 'Jaipur-Udaipur Superfast Express', 3, 'PASSENGER', 'Jaipur', 'Udaipur', 6 * 60 + 20, 'SUPERFAST',
+    [['Jaipur', 0], ['Kanakpura', 9], ['Phulera', 55], ['Kishangarh', 105], ['Ajmer', 132]]),
+  route('12982', 'Udaipur-Jaipur Superfast Express', 3, 'PASSENGER', 'Udaipur', 'Jaipur', 7 * 60 + 20, 'SUPERFAST',
+    [['Ajmer', 132], ['Kishangarh', 105], ['Phulera', 55], ['Kanakpura', 9], ['Jaipur', 0]]),
+  route('20977', 'Vande Bharat Express', 1, 'EXPRESS', 'Ajmer', 'Chandigarh', 10 * 60 + 30, 'EXPRESS',
+    [['Jaipur', 0], ['Kanakpura', 9], ['Phulera', 55], ['Kishangarh', 105], ['Ajmer', 132]]),
+  route('20978', 'Vande Bharat Express', 1, 'EXPRESS', 'Chandigarh', 'Ajmer', 13 * 60 + 20, 'EXPRESS',
+    [['Ajmer', 132], ['Kishangarh', 105], ['Phulera', 55], ['Kanakpura', 9], ['Jaipur', 0]]),
+  route('12015', 'Ajmer Shatabdi Express', 1, 'EXPRESS', 'New Delhi', 'Ajmer', 13 * 60, 'EXPRESS',
+    [['Jaipur', 0], ['Kanakpura', 9], ['Phulera', 55], ['Kishangarh', 105], ['Ajmer', 132]]),
+  route('12016', 'Ajmer Shatabdi Express', 1, 'EXPRESS', 'Ajmer', 'New Delhi', 14 * 60 + 30, 'EXPRESS',
+    [['Ajmer', 132], ['Kishangarh', 105], ['Phulera', 55], ['Kanakpura', 9], ['Jaipur', 0]]),
 ];
 
 interface DivisionCatalog {

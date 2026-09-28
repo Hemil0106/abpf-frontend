@@ -8,7 +8,7 @@ import {
   type LiveHit,
   type ZoneHit,
 } from '../tsd/renderTimeSpace';
-import { kmToY, parseTimeToMinutes, timeToX, trainDelayMins, trajectoryPoint, trainStops, type TrajectoryPoint } from '../tsd/tsdMath';
+import { kmToY, parseTimeToMinutes, timeToX, trainDelayMins, trajectoryLive, trainStops, type TrajectoryPoint } from '../tsd/tsdMath';
 import { enforceParity, getFallbackTrains } from '../data/mockData';
 
 interface TimeSpaceChartProps {
@@ -217,15 +217,21 @@ export function TimeSpaceChart({
     // toward those targets so motion stays smooth between ticks.
     const recomputeTargets = () => {
       const t = simRef.current.timeMins;
+      const next: Record<string, TrajectoryPoint> = {};
       for (const [id, liveTarget] of Object.entries(liveRef.current)) {
         const train = trains.find((tr) => tr.trainId === id);
-        targetsRef.current[id] = train
-          ? trajectoryPoint(trainStops(train, stations, startKm, endKm), t)
-          : { km: liveTarget.km, timeMins: liveTarget.mins ?? t };
+        if (!train) {
+          next[id] = { km: liveTarget.km, timeMins: liveTarget.mins ?? t };
+          continue;
+        }
+        // Strict trajectory locking: the marker sits exactly on THIS train's
+        // own string. Before departure (t < dep) or after arrival (t > arr)
+        // trajectoryLive returns null -> the marker is dropped entirely
+        // instead of leaving a stray dot at the origin/terminal.
+        const live = trajectoryLive(trainStops(train, stations, startKm, endKm), t);
+        if (live) next[id] = live;
       }
-      for (const id of Object.keys(targetsRef.current)) {
-        if (!liveRef.current[id]) delete targetsRef.current[id];
-      }
+      targetsRef.current = next;
     };
 
     const paint = () => {
@@ -522,7 +528,7 @@ export function TimeSpaceChart({
         <div className="flex items-center gap-4">
           <LegendDot color="#38bdf8" label="Express (UP)" />
           <LegendDot color="#eab308" label="Freight (DOWN)" />
-          <span className="text-[10px] text-slate-500">DOWN lane = dashed</span>
+          <span className="text-[10px] text-slate-500">DOWN lane / DFC rake = dashed</span>
           <LegendDot color="#22c55e" label="Block" />
           <LegendDot color="#E53935" label="Conflict" />
           <LegendDot color="#ef4444" label="Disruption" />
