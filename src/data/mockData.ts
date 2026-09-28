@@ -19,9 +19,9 @@ const NWR_ID = 'NWR_JAIPUR'; // Jaipur – Phulera – Ajmer
 
 /** Union of every real train number allowed in any roster, for leak tests. */
 export const ALL_AUTHENTIC_TRAINS = [
-  '12123', '12124', '22221', '22222', '11057', '11058', '12137', '12138',
-  '12951', '12952', '12953', '12954', '22901', '22902', 'FR-001', 'FR-002',
-  '12981', '12982', '20977', '20978', '12015', '12016',
+  '12123', '12124', '12127', '11057', '11058', '11060', '12137', '12138', '22221', '22222',
+  '12951', '12952', '12953', '12954', '12955', '12956', '22901', '22902', 'FR-001', 'FR-002',
+  '12981', '12982', '12983', '12984', '20977', '20978', '12015', '12016',
 ] as const;
 export type AuthenticTrainId = (typeof ALL_AUTHENTIC_TRAINS)[number];
 
@@ -94,6 +94,10 @@ const CR_TRAINS: TrainDto[] = [
     [['CSMT', 0], ['Dadar', 9], ['Thane', 34], ['Kalyan', 54], ['Karjat', 100], ['Kasara', 121]]),
   route('12138', 'Punjab Mail', 3, 'PASSENGER', 'Firozpur', 'CSMT', 12 * 60 + 30, 'SUPERFAST',
     [['Kasara', 121], ['Karjat', 100], ['Kalyan', 54], ['Thane', 34], ['Dadar', 9], ['CSMT', 0]]),
+  route('12127', 'Himgiri Express', 1, 'EXPRESS', 'CSMT', 'Nagpur', 21 * 60 + 30, 'EXPRESS',
+    [['CSMT', 0], ['Kalyan', 54], ['Kasara', 121]]),
+  route('11060', 'Himgiri Express', 1, 'EXPRESS', 'Nagpur', 'CSMT', 22 * 60 + 15, 'EXPRESS',
+    [['Kasara', 121], ['Kalyan', 54], ['CSMT', 0]]),
 ];
 
 /** WR (Mumbai – Borivali – Vapi – Surat): Western Dedicated Corridor. */
@@ -114,6 +118,10 @@ const WR_TRAINS: TrainDto[] = [
     [['MMCT', 0], ['Borivali', 30], ['Vapi', 167], ['Surat', 263]]),
   route('FR-002', 'Western DFC Container Rake', 4, 'FREIGHT', 'Surat', 'MMCT', 9 * 60, 'FREIGHT',
     [['Surat', 263], ['Vapi', 167], ['Borivali', 30], ['MMCT', 0]]),
+  route('12955', 'August Kranti Rajdhani Express', 1, 'EXPRESS', 'MMCT', 'Hazrat Nizamuddin', 21 * 60 + 30, 'EXPRESS',
+    [['MMCT', 0], ['Borivali', 30], ['Vapi', 167], ['Surat', 263]]),
+  route('12956', 'August Kranti Rajdhani Express', 1, 'EXPRESS', 'Hazrat Nizamuddin', 'MMCT', 21 * 60, 'EXPRESS',
+    [['Surat', 263], ['Vapi', 167], ['Borivali', 30], ['MMCT', 0]]),
 ];
 
 /** NWR (Jaipur – Phulera – Kishangarh – Ajmer): Jaipur division. */
@@ -129,6 +137,10 @@ const NWR_TRAINS: TrainDto[] = [
   route('12015', 'Ajmer Shatabdi Express', 1, 'EXPRESS', 'New Delhi', 'Ajmer', 13 * 60, 'EXPRESS',
     [['Jaipur', 0], ['Kanakpura', 9], ['Phulera', 55], ['Kishangarh', 105], ['Ajmer', 132]]),
   route('12016', 'Ajmer Shatabdi Express', 1, 'EXPRESS', 'Ajmer', 'New Delhi', 14 * 60 + 30, 'EXPRESS',
+    [['Ajmer', 132], ['Kishangarh', 105], ['Phulera', 55], ['Kanakpura', 9], ['Jaipur', 0]]),
+  route('12983', 'Ajmer-Jaipur Passenger', 3, 'PASSENGER', 'Jaipur', 'Ajmer', 21 * 60 + 30, 'SUPERFAST',
+    [['Jaipur', 0], ['Kanakpura', 9], ['Phulera', 55], ['Kishangarh', 105], ['Ajmer', 132]]),
+  route('12984', 'Ajmer-Jaipur Passenger', 3, 'PASSENGER', 'Ajmer', 'Jaipur', 22 * 60, 'SUPERFAST',
     [['Ajmer', 132], ['Kishangarh', 105], ['Phulera', 55], ['Kanakpura', 9], ['Jaipur', 0]]),
 ];
 

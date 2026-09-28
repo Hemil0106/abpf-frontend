@@ -210,19 +210,23 @@ export function TimeSpaceChart({
       return telemetry && telemetry.speedKmh > 0 ? telemetry.speedKmh : categorySpeed(train);
     };
 
-    // Markers are bound to each train's OWN straight trajectory line: every 2s
-    // the operational timeline advances +2 sim minutes and each marker's target
-    // is recomputed from that train's single dep→arr string, so X and Y both
-    // derive from the SAME progress ratio. An rAF loop lerps rendered X/Y
-    // toward those targets so motion stays smooth between ticks.
+    // LOOP 2 — live pointers, ROSTER-driven (not telemetry-driven): every train
+    // in the displayed roster gets a target, and trajectoryOver only returns one
+    // while the sim clock is inside that train's own dep→arr window, so only
+    // currently-running trains show a pointer. An rAF loop lerps rendered X/Y
+    // toward the targets so motion stays smooth between the 2s ticks.
     const recomputeTargets = () => {
       const t = simRef.current.timeMins;
       const next: Record<string, TrajectoryPoint> = {};
-      for (const [id] of Object.entries(liveRef.current)) {
-        const train = trains.find((tr) => tr.trainId === id);
-        if (!train) continue; // unknown track has no string to lock to — never draw on a global column
+      for (const train of trains) {
         const live = trajectoryOver(trainStops(train, stations, startKm, endKm), t);
-        if (live) next[id] = live;
+        if (live) next[train.trainId] = live;
+      }
+      // Drop markers of trains that left their run window, so a re-entering
+      // train (after the 1440-minute clock wrap) starts on its own string
+      // instead of lerping across the canvas from a stale position.
+      for (const id of Object.keys(markersRef.current)) {
+        if (!next[id]) delete markersRef.current[id];
       }
       targetsRef.current = next;
     };
@@ -402,7 +406,12 @@ export function TimeSpaceChart({
       const train = trains.find((t) => t.trainId === inspector.id);
       if (!train) return null;
       const pos = liveRef.current[train.trainId];
-      const delay = trainDelayMins(train, startKm, endKm, parseTimeToMinutes(new Date()), pos?.km);
+      // Position comes from telemetry when present, else the marker's own
+      // locked point on the chart (markers are roster-driven, telemetry sparse).
+      const marker = markersRef.current[train.trainId];
+      const km = pos?.km ?? marker?.km ?? 0;
+      const speed = pos?.speedKmh ?? (marker ? categorySpeed(train) : 0);
+      const delay = trainDelayMins(train, startKm, endKm, parseTimeToMinutes(new Date()), km);
       return (
         <div className="space-y-1.5">
           <Row k="Type" v={`${train.type ?? 'PASSENGER'} Train`} />
@@ -412,8 +421,8 @@ export function TimeSpaceChart({
             k="Schedule"
             v={`Dep ${hhmm(parseTimeToMinutes(train.departureTime))} · Arr ${hhmm(parseTimeToMinutes(train.arrivalTime))}`}
           />
-          <Row k="Current Position" v={`${stationOf(pos?.km ?? 0).stationName} (${Math.round(pos?.km ?? 0)} KM)`} />
-          <Row k="Speed" v={`${(pos?.speedKmh ?? 0).toFixed(0)} km/h`} />
+          <Row k="Current Position" v={`${stationOf(km).stationName} (${Math.round(km)} KM)`} />
+          <Row k="Speed" v={`${speed.toFixed(0)} km/h`} />
           <Row k="Delay" v={delay > 0 ? `+${delay} min` : 'On time'} tone={delay > 0 ? 'text-amber-300' : 'text-emerald-400'} />
           <Row k="Priority" v={String(train.priority)} />
           <Row k="TSR" v="None reported" tone="text-slate-400" />

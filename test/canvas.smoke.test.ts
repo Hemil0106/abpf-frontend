@@ -214,8 +214,18 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
   ];
 
   const { ctx, calls } = mockCtx();
+  // Recorder for text placement, so the bottom 24-hour tick labels can be
+  // asserted as actually drawn (and above the scrollbar gutter).
+  const texts: Array<[string, number, number]> = [];
+  const spy = new Proxy({} as CanvasRenderingContext2D, {
+    get: (_t, p: string) =>
+      p === 'fillText'
+        ? (s: string, x: number, y: number) => { texts.push([s, x, y]); }
+        : (ctx as unknown as Record<string, unknown>)[p],
+    set: (_t, p: string, v: unknown) => { (ctx as unknown as Record<string, unknown>)[p] = v; return true; },
+  });
   // Live train sitting exactly on the BRC station line (km 160).
-  const stats = drawTimeSpace(ctx, {
+  const stats = drawTimeSpace(spy, {
     width: 800,
     height: 400,
     startKm: 0,
@@ -266,6 +276,14 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
   assert.equal(stats.zoneHits[0].w, 800 - 80 - 40, 'band width covers the plot');
   assert.equal(stats.zoneHits[0].h, 16, 'band is 16px tall');
   assert.equal(Math.round(stats.zoneHits[0].y), Math.round(kmToY(100, 0, 320, 400, 40, 70) - 8), 'band centres on the asset chainage');
+
+  // 24-hour day ticks stay visible in the bottom gutter, above the scrollbar.
+  const hourTicks = texts.filter(([s, , y]) => /^\d{2}:00$/.test(s) && y === 400 - 25).map(([s]) => s);
+  assert.deepEqual(hourTicks, ['00:00', '03:00', '06:00', '09:00', '12:00', '15:00', '18:00', '21:00', '24:00'], 'all nine hour ticks drawn at height-25');
+  assert.ok(
+    texts.every(([, , y]) => y <= 400 - 10),
+    'no label is drawn into the scrollbar strip below the gutter',
+  );
 });
 
 test('drawNetworkMap: nodes, risk-tinted corridors', () => {

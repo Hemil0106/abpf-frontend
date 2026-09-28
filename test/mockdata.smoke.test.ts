@@ -6,9 +6,9 @@ import {
   ALL_AUTHENTIC_TRAINS,
 } from '../src/data/mockData';
 
-const CR = ['11057', '11058', '12123', '12124', '12137', '12138', '22221', '22222'];
-const WR = ['12951', '12952', '12953', '12954', '22901', '22902', 'FR-001', 'FR-002'].sort();
-const NWR = ['12015', '12016', '12981', '12982', '20977', '20978'];
+const CR = ['11057', '11058', '11060', '12123', '12124', '12127', '12137', '12138', '22221', '22222'];
+const WR = ['12951', '12952', '12953', '12954', '12955', '12956', '22901', '22902', 'FR-001', 'FR-002'].sort();
+const NWR = ['12015', '12016', '12981', '12982', '12983', '12984', '20977', '20978'];
 
 const ids = (trains: readonly TrainDto[]): string[] => trains.map((t) => t.trainId).sort();
 
@@ -23,9 +23,9 @@ test('mockData: authentic per-zone rosters with strict parity and zero cross-zon
   const wr = trainsForDivision('WR_MUMBAI');
   const nwr = trainsForDivision('NWR_JAIPUR');
 
-  assert.deepEqual(ids(cr), CR, 'CR roster is exactly the 8 authentic CSMT-section trains');
-  assert.deepEqual(ids(wr), WR, 'WR roster is exactly the 8 authentic MMCT-section trains');
-  assert.deepEqual(ids(nwr), NWR, 'NWR roster is exactly the 6 authentic Jaipur-section trains');
+  assert.deepEqual(ids(cr), CR, 'CR roster is exactly the 10 authentic CSMT-section trains');
+  assert.deepEqual(ids(wr), WR, 'WR roster is exactly the 10 authentic MMCT-section trains');
+  assert.deepEqual(ids(nwr), NWR, 'NWR roster is exactly the 8 authentic Jaipur-section trains');
 
   // Cross-zone leakage: no roster may contain any other zone's train number.
   for (const t of ids(cr)) assert.ok(!WR.includes(t) && !NWR.includes(t), `${t} must not leak`);
@@ -102,6 +102,18 @@ test('mockData: class-speed slopes diverge and departures never collide', () => 
     const deps = list.map(depOf);
     assert.equal(new Set(deps).size, deps.length, `${roster} departures must all be distinct`);
     assert.equal(list.length, new Set(list.map((t) => t.trainId)).size, `${roster} train ids unique`);
+
+    // Chart-population guard: 8-12 trains per division, departures spread over
+    // at least 6 distinct hours of the 24h day, and no run wrapping past
+    // midnight (a wrapped window would break the straight-string lock).
+    assert.ok(list.length >= 8 && list.length <= 12, `${roster} roster size 8-12 (got ${list.length})`);
+    const depHours = new Set(deps.map((m) => Math.floor(m / 60)));
+    assert.ok(depHours.size >= 6, `${roster} departures spread over >= 6 distinct hours (got ${depHours.size})`);
+    for (const t of list) {
+      const s = t.schedule!;
+      const arr = toMins(String(s[s.length - 1].time));
+      assert.ok(arr > 0 && arr < 1440, `${t.trainId} must arrive inside the same day (got ${arr} min)`);
+    }
   }
 });
 

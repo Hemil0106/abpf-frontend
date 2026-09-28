@@ -320,10 +320,14 @@ export function drawTimeSpace(
     }
   }
 
-  // Train trajectories (desktop mirror): soft glow underlay + 2.5px core,
-  // coloured by priority (≤2 blue, else amber); with "Conflicts Only" enabled
-  // non-conflicting strings are dimmed instead of hidden. The id label sits in
-  // a dark pill at the string's chord midpoint.
+  // Train trajectories — LOOP 1, always drawn for EVERY train, never filtered by
+  // the clock: one straight string from this train's own departure
+  // (x1, y1) to its arrival (x2, y2), the exact line the live pointer is locked
+  // to, so marker and line can never disagree. Blue for express/passenger,
+  // amber + dashed for freight/DOWN. Soft glow underlay + 2.5px core; the id
+  // label sits in a dark pill at the chord midpoint. The stop polyline (not the
+  // chord) still drives block-conflict and disruption intersection tests, so a
+  // mid-section stop is honoured there at sub-pixel scale.
   const polylines = opts.trains.map((train) => ({ train, points: trainStops(train, opts.stations, minKm, maxKm) }));
 
   const conflicted = new Map<string, boolean>();
@@ -332,6 +336,16 @@ export function drawTimeSpace(
     conflicted.set(train.trainId, segs.some((seg) => blockWindows.some((win) => segmentRectHit(seg, win))));
   }
 
+  /** Dep→arr chord in pixels — the shared geometry for the string and its marker. */
+  const chordOf = (points: { timeMins: number; km: number }[]) => {
+    const first = points[0];
+    const last = points[points.length - 1];
+    return {
+      x1: xOf(first.timeMins), y1: yOf(first.km),
+      x2: xOf(last.timeMins), y2: yOf(last.km),
+    };
+  };
+
   for (const { train, points } of polylines) {
     if (points.length < 2) continue;
     if (!points.some((p) => scale.inView(p.timeMins))) continue;
@@ -339,18 +353,15 @@ export function drawTimeSpace(
     const down = laneOf(train, points) < 0;
     const dash = dashOf(train, down);
     const dim = opts.conflictsOnly && !(conflicted.get(train.trainId) ?? false);
+    const { x1, y1, x2, y2 } = chordOf(points);
     if (dim) {
       ctx.save();
       if (dash) ctx.setLineDash(dash);
       ctx.strokeStyle = hexA(color, 30 / 255);
       ctx.lineWidth = 1;
       ctx.beginPath();
-      points.forEach((p, idx) => {
-        const px = xOf(p.timeMins);
-        const py = yOf(p.km);
-        if (idx === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      });
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
       ctx.stroke();
       ctx.restore();
       stats.trains += 1;
@@ -361,21 +372,15 @@ export function drawTimeSpace(
     ctx.strokeStyle = hexA(color, 35 / 255);
     ctx.lineWidth = 7;
     ctx.beginPath();
-    points.forEach((p, idx) => {
-      const px = xOf(p.timeMins);
-      const py = yOf(p.km);
-      if (idx === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    });
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
     ctx.stroke();
     ctx.strokeStyle = color;
     ctx.lineWidth = 2.5;
     ctx.stroke();
     ctx.restore();
-    const first = points[0];
-    const last = points[points.length - 1];
-    const midX = (xOf(first.timeMins) + xOf(last.timeMins)) / 2;
-    const midY = (yOf(first.km) + yOf(last.km)) / 2;
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2;
     const label = down ? `${train.trainId} ▾` : `${train.trainId} ▴`;
     ctx.font = '9px monospace';
     const textW = ctx.measureText(label).width;
@@ -384,6 +389,7 @@ export function drawTimeSpace(
     ctx.roundRect(midX - 2, midY - 13, textW + 8, 14, 8);
     ctx.fill();
     ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = 'left';
     ctx.fillText(label, midX + 2, midY - 3);
     stats.trains += 1;
   }
