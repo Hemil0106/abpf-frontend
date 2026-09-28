@@ -492,12 +492,14 @@ export function drawTimeSpace(
     const label = liveDir === 'DOWN' ? `${trainId} ▾` : liveDir === 'UP' ? `${trainId} ▴` : trainId;
     ctx.font = '9px monospace';
     const textW = ctx.measureText(label).width;
+    // Badge offset (+10, -12) from the marker centre so passing trains' labels
+    // never stack over each other or cover their own glowing dot.
     ctx.fillStyle = 'rgba(25, 33, 48, 0.86)';
     ctx.beginPath();
-    ctx.roundRect(mx + 8 - 3, nearBottom ? my - 30 : my - 13, textW + 6, 12, 6);
+    ctx.roundRect(mx + 10, nearBottom ? my - 12 - 12 : my - 12, textW + 6, 12, 6);
     ctx.fill();
     ctx.fillStyle = '#FFFFFF';
-    ctx.fillText(label, mx + 8, nearBottom ? my - 18 : my - 4);
+    ctx.fillText(label, mx + 13, nearBottom ? my - 16 : my - 4);
     stats.live += 1;
     stats.liveHits.push({ trainId, x: mx, y: my });
   }

@@ -283,8 +283,8 @@ export function TimeSpaceChart({
       let moved = false;
       for (const [id, t] of Object.entries(targetsRef.current)) {
         const prev = markersRef.current[id] ?? t;
-        const km = prev.km + (t.km - prev.km) * 0.08;
-        const timeMins = prev.timeMins + (t.timeMins - prev.timeMins) * 0.08;
+        const km = prev.km + (t.km - prev.km) * 0.05;
+        const timeMins = prev.timeMins + (t.timeMins - prev.timeMins) * 0.05;
         if (Math.abs(km - prev.km) > 0.02 || Math.abs(timeMins - prev.timeMins) > 0.02) moved = true;
         markersRef.current[id] = { km, timeMins };
       }
