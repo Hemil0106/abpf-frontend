@@ -292,6 +292,35 @@ export function trajectoryOver(
   };
 }
 
+export const MIN_ZOOM = 1;
+export const MAX_ZOOM = 5;
+
+/**
+ * Pan X is clamped so the scaled day always covers the viewport: at zoom z the
+ * content is width·z wide, so panning stays inside [width·(1 − z), 0].
+ */
+export function clampPanX(x: number, width: number, zoom: number): number {
+  return Math.min(0, Math.max(width * (1 - zoom), x));
+}
+
+/**
+ * Cursor-locked wheel zoom (Google Maps style): zooms by `factor` while keeping
+ * the chart point under screen-x `sx` exactly where it is, i.e. the logical
+ * point (sx − panX) / zoom is invariant across the change.
+ */
+export function zoomAtCursor(
+  sx: number,
+  panX: number,
+  zoom: number,
+  factor: number,
+  width: number,
+): { zoom: number; panX: number } {
+  const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * factor));
+  if (next === zoom) return { zoom, panX: clampPanX(panX, width, zoom) };
+  const lx = (sx - panX) / zoom;
+  return { zoom: next, panX: clampPanX(sx - lx * next, width, next) };
+}
+
 function stopsFromPayload(train: TrainDto): Array<{
   time?: string | number;
   km?: number;

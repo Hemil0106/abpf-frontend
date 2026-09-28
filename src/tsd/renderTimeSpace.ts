@@ -211,6 +211,35 @@ export function drawTimeSpace(
 
   ctx.font = '11px ui-monospace, monospace';
 
+  // The view transform scales X only (pan + zoom). Text therefore goes through
+  // these two helpers, which cancel that horizontal scale so glyphs stay
+  // readable instead of being smeared sideways at high zoom.
+  const xScale = (): number => {
+    const tr = typeof ctx.getTransform === 'function' ? ctx.getTransform() : null;
+    const a = tr && typeof tr.a === 'number' && tr.a > 0 ? tr.a : 1;
+    return a;
+  };
+  const measure = (text: string): number => {
+    const a = xScale();
+    if (a === 1) return ctx.measureText(text).width;
+    ctx.save();
+    ctx.scale(1 / a, 1);
+    const w = ctx.measureText(text).width;
+    ctx.restore();
+    return w;
+  };
+  const drawText = (text: string, x: number, y: number) => {
+    const a = xScale();
+    if (a === 1) {
+      ctx.fillText(text, x, y);
+      return;
+    }
+    ctx.save();
+    ctx.scale(1 / a, 1);
+    ctx.fillText(text, x * a, y);
+    ctx.restore();
+  };
+
   const plotW = width - LEFT_PAD - RIGHT_PAD;
   const plotH = height - TOP_PAD - BOTTOM_PAD;
 
@@ -230,7 +259,7 @@ export function drawTimeSpace(
     ctx.stroke();
     const label = `${km} KM`;
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText(label, LEFT_PAD - ctx.measureText(label).width - 6, y + 4);
+    drawText(label, LEFT_PAD - measure(label) - 6, y + 4);
   }
   for (let min = 0; min <= 1440; min += 30) {
     const gx = xOf(min);
@@ -251,7 +280,7 @@ export function drawTimeSpace(
     ctx.lineTo(LEFT_PAD + plotW, y);
     ctx.stroke();
     ctx.fillStyle = '#E0E0E0';
-    ctx.fillText(station.stationName, LEFT_PAD + plotW + 6, y + 4);
+    drawText(station.stationName, LEFT_PAD + plotW + 6, y + 4);
     stats.stations += 1;
   }
   ctx.setLineDash([]);
@@ -263,7 +292,7 @@ export function drawTimeSpace(
   // so the labels are never clipped by the scrolling container.
   ctx.fillStyle = '#94a3b8';
   for (let min = 0; min <= 1440; min += 180) {
-    ctx.fillText(`${String(min / 60).padStart(2, '0')}:00`, xOf(min) - 12, height - 25);
+    drawText(`${String(min / 60).padStart(2, '0')}:00`, xOf(min) - 12, height - 25);
   }
   ctx.restore();
 
@@ -297,9 +326,9 @@ export function drawTimeSpace(
       ctx.fill();
       ctx.stroke();
       ctx.restore();
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 10px monospace';
-      ctx.fillText(block.blockId, bx + 8, by + 16);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 10px monospace';
+    drawText(block.blockId, bx + 8, by + 16);
       stats.blocks += 1;
       stats.blockHits.push({ blockId: block.blockId, x: bx, y: by, w: bw, h: bh });
     }
@@ -383,14 +412,14 @@ export function drawTimeSpace(
     const midY = (y1 + y2) / 2;
     const label = down ? `${train.trainId} ▾` : `${train.trainId} ▴`;
     ctx.font = '9px monospace';
-    const textW = ctx.measureText(label).width;
+    const textW = measure(label);
     ctx.fillStyle = 'rgba(25, 33, 48, 0.86)';
     ctx.beginPath();
     ctx.roundRect(midX - 2, midY - 13, textW + 8, 14, 8);
     ctx.fill();
     ctx.fillStyle = '#FFFFFF';
     ctx.textAlign = 'left';
-    ctx.fillText(label, midX + 2, midY - 3);
+    drawText(label, midX + 2, midY - 3);
     stats.trains += 1;
   }
 
@@ -470,10 +499,10 @@ export function drawTimeSpace(
         ctx.stroke();
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 9px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('!', cx, cy + 0.5);
-        ctx.restore();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      drawText('!', cx, cy + 0.5);
+      ctx.restore();
         stats.disruptionHits.push({ disruptionId: d.id, x: cx, y: cy });
       }
     }
@@ -507,7 +536,7 @@ export function drawTimeSpace(
     const liveDir = opts.trains.find((t) => t.trainId === trainId)?.direction;
     const label = liveDir === 'DOWN' ? `${trainId} ▾` : liveDir === 'UP' ? `${trainId} ▴` : trainId;
     ctx.font = '9px monospace';
-    const textW = ctx.measureText(label).width;
+    const textW = measure(label);
     const flip = liveIndex % 2 === 1;
     // Badge alternately (+10, -12) or mirrored to the left so adjacent passing
     // trains' labels never stack in the same spot; near-bottom markers flip
@@ -519,7 +548,7 @@ export function drawTimeSpace(
     ctx.fillStyle = '#FFFFFF';
     ctx.textAlign = flip ? 'right' : 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText(label, flip ? mx - 13 : mx + 13, nearBottom ? my - 16 : my - 4);
+    drawText(label, flip ? mx - 13 : mx + 13, nearBottom ? my - 16 : my - 4);
     ctx.textAlign = 'left';
     liveIndex += 1;
     stats.live += 1;

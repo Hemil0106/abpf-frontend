@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type { AssetDto, BlockDto, CandidatePlan, StationDto, TrainDto } from '../src/types';
 import {
   buildDayScale,
+  clampPanX,
   dayWindow,
   getMinutesFromMidnight,
   kmOfStation,
@@ -19,6 +20,7 @@ import {
   trajectoryLive,
   trajectoryOver,
   trajectoryPoint,
+  zoomAtCursor,
 } from '../src/tsd/tsdMath';
 import { mockCtx } from './helpers';
 import { drawTimeSpace } from '../src/tsd/renderTimeSpace';
@@ -179,6 +181,24 @@ test('tsdMath: robust stop parsing, X/Y converters, degenerate-section guards', 
   assert.equal(scheduled[1].timeMins, 480, 'time with no arrival/departure');
   assert.equal(scheduled[1].km, 160, 'missing chainageKm falls back to km');
   assert.equal(scheduled[2].km, 320, 'chainageKm parsed');
+});
+
+test('tsdMath: view transform - cursor-locked wheel zoom and pan clamping', () => {
+  assert.equal(clampPanX(50, 1000, 1), 0, 'no horizontal freedom at 1x');
+  assert.equal(clampPanX(-5000, 1000, 3), -2000, 'pan stops where the scaled day still covers the viewport');
+  assert.equal(clampPanX(200, 1000, 3), 0, 'pan never pushes the left edge off-screen');
+
+  // The chart point under the cursor must not move while zooming.
+  for (const [sx, panX, zoom, factor] of [
+    [700, 0, 1, 1.1], [300, -400, 2, 1.1], [120, -1500, 4, 0.9], [640, -200, 2.5, 1.1],
+  ] as const) {
+    const before = (sx - panX) / zoom;
+    const next = zoomAtCursor(sx, panX, zoom, factor, 1000);
+    assert.equal((sx - next.panX) / next.zoom, before, `logical point pinned at sx=${sx} zoom=${zoom}`);
+    assert.ok(next.zoom >= 1 && next.zoom <= 5, 'zoom stays clamped to 1x-5x');
+  }
+  assert.equal(zoomAtCursor(700, 0, 5, 1.1, 1000).zoom, 5, 'zoom-in stops at 5x');
+  assert.equal(zoomAtCursor(700, 0, 1, 0.9, 1000).zoom, 1, 'zoom-out stops at 1x');
 });
 
 test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live marker', () => {

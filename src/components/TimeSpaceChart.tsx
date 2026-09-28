@@ -8,7 +8,7 @@ import {
   type LiveHit,
   type ZoneHit,
 } from '../tsd/renderTimeSpace';
-import { kmToY, parseTimeToMinutes, timeToX, trainDelayMins, trajectoryOver, trainStops, type TrajectoryPoint } from '../tsd/tsdMath';
+import { clampPanX, kmToY, MAX_ZOOM, MIN_ZOOM, parseTimeToMinutes, timeToX, trainDelayMins, trajectoryOver, zoomAtCursor, trainStops, type TrajectoryPoint } from '../tsd/tsdMath';
 import { enforceParity, getFallbackTrains } from '../data/mockData';
 
 interface TimeSpaceChartProps {
@@ -138,7 +138,18 @@ export function TimeSpaceChart({
   const targetsRef = useRef<Record<string, TrajectoryPoint>>({});
   const markersRef = useRef<Record<string, TrajectoryPoint>>({});
 
-  const [zoom, setZoom] = useState(1);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  // Refs mirror the view state so the rAF paint loop reads the live transform
+  // without re-subscribing (a 60 fps drag must never restart the loop).
+  const panRef = useRef(panOffset);
+  panRef.current = panOffset;
+  const zoomRef = useRef(zoomLevel);
+  zoomRef.current = zoomLevel;
+  const dragRef = useRef({ x: 0, y: 0 });
+  const draggedRef = useRef(false);
+  const dirtyRef = useRef(true);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [showBlocks, setShowBlocks] = useState(true);
   const [conflictsOnly, setConflictsOnly] = useState(false);
@@ -201,7 +212,6 @@ export function TimeSpaceChart({
     const wrap = wrapRef.current;
     if (!canvas || !wrap) return;
 
-    let dirty = true;
     let raf = 0;
 
     const speedOf = (trainId: string): number => {
@@ -235,17 +245,22 @@ export function TimeSpaceChart({
       const dpr = window.devicePixelRatio || 1;
       const rect = wrap.getBoundingClientRect();
       if (rect.width === 0) return;
-      // Horizontal zoom grows the canvas width so the day keeps a constant
-      // pixel pitch and the window scrolls; 65px bottom gutter holds the
-      // explicit time labels.
-      const zoomWidth = Math.max(rect.width, rect.width * zoom);
-      canvas.width = Math.round(zoomWidth * dpr);
+      // The canvas stays viewport-sized; the Google-Maps transform does the
+      // zooming, so hit regions are always recorded in logical chart space.
+      const width = rect.width;
+      canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(650 * dpr);
-      canvas.style.width = `${zoomWidth}px`;
+      canvas.style.width = `${width}px`;
       canvas.style.height = '650px';
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      // Pan + X-only zoom: drag scrolls the day sideways, wheel zooms about the
+      // cursor. Text is drawn unscaled by the renderer's own counter-scale.
+      ctx.save();
+      ctx.translate(panRef.current.x, panRef.current.y);
+      ctx.scale(zoomRef.current, 1);
 
       // Pass the currently-lerped (km, mins) pair straight through: mins pins
       // the marker to its schedule time on the X axis, km to chainage on Y, so
@@ -257,7 +272,7 @@ export function TimeSpaceChart({
       }
 
       const stats = drawTimeSpace(ctx, {
-        width: zoomWidth,
+        width,
         height: 650,
         startKm,
         endKm,
@@ -267,11 +282,12 @@ export function TimeSpaceChart({
         assets,
         live: slides,
         disruptions: disruptionsRef.current,
-        zoom,
+        zoom: 1,
         showHeatmap,
         showBlocks,
         conflictsOnly,
       });
+      ctx.restore();
       hitsRef.current = {
         blocks: stats.blockHits,
         live: stats.liveHits,
@@ -292,8 +308,8 @@ export function TimeSpaceChart({
       }
       // Pulsing disruption badges need a repaint every frame while present.
       if (disruptionsRef.current.length > 0) moved = true;
-      if (moved || dirty) {
-        dirty = false;
+      if (moved || dirtyRef.current) {
+        dirtyRef.current = false;
         paint();
       }
     };
@@ -306,7 +322,7 @@ export function TimeSpaceChart({
     const timer = window.setInterval(() => {
       simRef.current.timeMins = (simRef.current.timeMins + 2) % 1440;
       recomputeTargets();
-      dirty = true;
+      dirtyRef.current = true;
     }, 2000);
 
     const observer = new ResizeObserver(paint);
@@ -316,7 +332,37 @@ export function TimeSpaceChart({
       window.clearInterval(timer);
       observer.disconnect();
     };
-  }, [startKm, endKm, stations, trains, blocks, assets, zoom, showHeatmap, showBlocks, conflictsOnly, activeSection]);
+  }, [startKm, endKm, stations, trains, blocks, assets, showHeatmap, showBlocks, conflictsOnly, activeSection]);
+
+  // Wheel zoom (Google Maps style): a NATIVE non-passive listener, because
+  // React's root-level onWheel is registered passive and preventDefault() would
+  // be ignored (the page would scroll instead of the day zooming).
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (ev: WheelEvent) => {
+      ev.preventDefault();
+      const view = zoomAtCursor(
+        ev.offsetX,
+        panRef.current.x,
+        zoomRef.current,
+        ev.deltaY < 0 ? 1.1 : 0.9,
+        canvas.clientWidth || 1,
+      );
+      setZoomLevel(view.zoom);
+      setPanOffset({ x: view.panX, y: 0 });
+      dirtyRef.current = true;
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Keep the pan inside the viewport whenever the zoom level changes.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    setPanOffset((prev) => ({ x: clampPanX(prev.x, canvas.clientWidth || 1, zoomLevel), y: 0 }));
+  }, [zoomLevel]);
 
   const stationOf = (km: number): { stationName: string; km: number } =>
     stations.reduce(
@@ -335,16 +381,17 @@ export function TimeSpaceChart({
 
   // Click-only hit testing, strict order: train marker/line → block rect →
   // disruption badge → risk-overlay dot. Same code drives the pointer cursor
-  // on hover and the inspector on click; no tooltip popups appear.
+  // on hover and the inspector on click; no tooltip popups appear. The input is
+  // in LOGICAL chart space (see toLogical) and the reported hits are logical
+  // too, so the pan/zoom transform never affects what gets picked.
   const pickAt = (x: number, y: number): InspectorItem | null => {
     const width = canvasRef.current?.clientWidth ?? 0;
     const { blocks, live: liveHits, zones, disruptions } = hitsRef.current;
     for (const l of liveHits) {
       if (Math.hypot(x - l.x, y - l.y) <= 10) return { type: 'train', id: l.trainId };
     }
-    for (const trainId of Object.keys(liveRef.current)) {
-      const train = trains.find((t) => t.trainId === trainId);
-      if (!train) continue;
+    for (const train of trains) {
+      const trainId = train.trainId;
       const points = trainStops(train, stations, startKm, endKm);
       for (let i = 0; i < points.length - 1; i++) {
         const a = points[i];
@@ -352,9 +399,9 @@ export function TimeSpaceChart({
         const dist = pointSegDist(
           x,
           y,
-          timeToX(a.timeMins, width, zoom),
+          timeToX(a.timeMins, width),
           kmToY(a.km, startKm, endKm, 650, 40, 70),
-          timeToX(b.timeMins, width, zoom),
+          timeToX(b.timeMins, width),
           kmToY(b.km, startKm, endKm, 650, 40, 70),
         );
         if (dist <= 10) return { type: 'train', id: trainId };
@@ -372,26 +419,60 @@ export function TimeSpaceChart({
     return null;
   };
 
+  // Convert a mouse event's screen-space point into the transform's logical
+  // chart space, the same space every drawn hit region lives in.
+  const toLogical = (e: React.MouseEvent<HTMLCanvasElement>): { x: number; y: number } => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const sx = e.nativeEvent.offsetX ?? e.clientX - (rect?.left ?? 0);
+    const sy = e.nativeEvent.offsetY ?? e.clientY - (rect?.top ?? 0);
+    return { x: (sx - panRef.current.x) / zoomRef.current, y: sy - panRef.current.y };
+  };
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (e.button !== 0) return;
+    dragRef.current = { x: e.clientX, y: e.clientY };
+    draggedRef.current = false;
+    setIsDragging(true);
+  };
+
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.nativeEvent.offsetX ?? e.clientX - rect.left;
-    const y = e.nativeEvent.offsetY ?? e.clientY - rect.top;
+    if (isDragging) {
+      const dx = e.clientX - dragRef.current.x;
+      const dy = e.clientY - dragRef.current.y;
+      if (Math.abs(dx) + Math.abs(dy) > 3) draggedRef.current = true;
+      const width = canvasRef.current?.clientWidth ?? 0;
+      setPanOffset((prev) => ({ x: clampPanX(prev.x + dx, width, zoomRef.current), y: 0 }));
+      dragRef.current = { x: e.clientX, y: e.clientY };
+      dirtyRef.current = true;
+      return;
+    }
+    const { x, y } = toLogical(e);
     setPointing(pickAt(x, y) !== null);
   };
 
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
   const handleMouseLeave = () => {
+    setIsDragging(false);
     setPointing(false);
   };
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.nativeEvent.offsetX ?? e.clientX - rect.left;
-    const y = e.nativeEvent.offsetY ?? e.clientY - rect.top;
+    // A drag that ends over the canvas must not open the inspector.
+    if (draggedRef.current) {
+      draggedRef.current = false;
+      return;
+    }
+    const { x, y } = toLogical(e);
     setInspector(pickAt(x, y));
+  };
+
+  const resetView = () => {
+    setZoomLevel(MIN_ZOOM);
+    setPanOffset({ x: 0, y: 0 });
+    dirtyRef.current = true;
   };
 
   const inspectorCard = (() => {
@@ -512,15 +593,22 @@ export function TimeSpaceChart({
           Zoom
           <input
             type="range"
-            min={1}
-            max={3}
+            min={MIN_ZOOM}
+            max={MAX_ZOOM}
             step={0.1}
-            value={zoom}
-            onChange={(e) => setZoom(Number(e.target.value))}
+            value={zoomLevel}
+            onChange={(e) => setZoomLevel(Number(e.target.value))}
             className="h-1.5 w-36 cursor-pointer rounded-lg bg-slate-800 accent-cyan-400"
           />
-          <span className="tabular-nums text-cyan-300">{zoom.toFixed(1)}×</span>
+          <span className="tabular-nums text-cyan-300">{zoomLevel.toFixed(1)}×</span>
         </label>
+        <button
+          onClick={resetView}
+          className="rounded-full border border-slate-700/60 bg-slate-800/40 px-3 py-1 text-[11px] font-medium text-slate-400 transition-all hover:text-slate-200"
+        >
+          Reset view
+        </button>
+        <span className="text-[10px] text-slate-500">Scroll to zoom · drag to pan</span>
         <span className="h-5 w-px bg-slate-700/60" />
         <TogglePill label="Risk Overlay" on={showHeatmap} onClick={() => setShowHeatmap(!showHeatmap)} />
         <TogglePill label="Maintenance Blocks" on={showBlocks} onClick={() => setShowBlocks(!showBlocks)} />
@@ -538,12 +626,14 @@ export function TimeSpaceChart({
       </div>
       <div
         ref={wrapRef}
-        className="relative min-h-0 flex-1 overflow-auto rounded-lg border border-slate-800 bg-slate-950 pb-6"
+        className="relative min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-800 bg-slate-950"
       >
         <canvas
           ref={canvasRef}
-          className={`block ${pointing ? 'cursor-pointer' : 'cursor-default'}`}
+          className={`block ${isDragging ? 'cursor-grabbing' : pointing ? 'cursor-pointer' : 'cursor-grab'}`}
+          onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseLeave}
           onClick={handleClick}
         />
