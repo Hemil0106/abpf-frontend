@@ -8,7 +8,7 @@ import {
   type LiveHit,
   type ZoneHit,
 } from '../tsd/renderTimeSpace';
-import { kmToY, parseTimeToMinutes, timeToX, trainDelayMins, trajectoryLive, trainStops, type TrajectoryPoint } from '../tsd/tsdMath';
+import { kmToY, parseTimeToMinutes, timeToX, trainDelayMins, trajectoryOver, trainStops, type TrajectoryPoint } from '../tsd/tsdMath';
 import { enforceParity, getFallbackTrains } from '../data/mockData';
 
 interface TimeSpaceChartProps {
@@ -210,25 +210,18 @@ export function TimeSpaceChart({
       return telemetry && telemetry.speedKmh > 0 ? telemetry.speedKmh : categorySpeed(train);
     };
 
-    // Markers are bound to each train's OWN sloped trajectory: every 2s the
-    // operational timeline advances +2 sim minutes and each marker's target is
-    // recomputed from its schedule segment (chainage AND clock both derive from
-    // the same progress). A requestAnimationFrame loop lerps rendered X/Y
+    // Markers are bound to each train's OWN straight trajectory line: every 2s
+    // the operational timeline advances +2 sim minutes and each marker's target
+    // is recomputed from that train's single dep→arr string, so X and Y both
+    // derive from the SAME progress ratio. An rAF loop lerps rendered X/Y
     // toward those targets so motion stays smooth between ticks.
     const recomputeTargets = () => {
       const t = simRef.current.timeMins;
       const next: Record<string, TrajectoryPoint> = {};
-      for (const [id, liveTarget] of Object.entries(liveRef.current)) {
+      for (const [id] of Object.entries(liveRef.current)) {
         const train = trains.find((tr) => tr.trainId === id);
-        if (!train) {
-          next[id] = { km: liveTarget.km, timeMins: liveTarget.mins ?? t };
-          continue;
-        }
-        // Strict trajectory locking: the marker sits exactly on THIS train's
-        // own string. Before departure (t < dep) or after arrival (t > arr)
-        // trajectoryLive returns null -> the marker is dropped entirely
-        // instead of leaving a stray dot at the origin/terminal.
-        const live = trajectoryLive(trainStops(train, stations, startKm, endKm), t);
+        if (!train) continue; // unknown track has no string to lock to — never draw on a global column
+        const live = trajectoryOver(trainStops(train, stations, startKm, endKm), t);
         if (live) next[id] = live;
       }
       targetsRef.current = next;
@@ -274,7 +267,6 @@ export function TimeSpaceChart({
         showHeatmap,
         showBlocks,
         conflictsOnly,
-        cursorMin: parseTimeToMinutes(new Date()),
       });
       hitsRef.current = {
         blocks: stats.blockHits,

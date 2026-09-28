@@ -17,6 +17,7 @@ import {
   trainSegment,
   trainStops,
   trajectoryLive,
+  trajectoryOver,
   trajectoryPoint,
 } from '../src/tsd/tsdMath';
 import { mockCtx } from './helpers';
@@ -109,6 +110,16 @@ test('tsdMath: parse time inputs, full-width X mapping, day window, segments, de
   assert.equal(trajectoryLive(segmentStops, 359), null, 'trajectoryLock: before departure draws NO marker');
   assert.equal(trajectoryLive(segmentStops, 601), null, 'trajectoryLock: after arrival draws NO marker');
   assert.equal(trajectoryLive([], 500), null, 'trajectoryLock: degenerated schedule draws NO marker');
+
+  assert.deepEqual(
+    trajectoryOver(segmentStops, 450),
+    { km: 120, timeMins: 450 },
+    'strictLine: (simMins - depMins)/(arrMins - depMins) rides the single dep-ar Arr string',
+  );
+  assert.deepEqual(trajectoryOver(segmentStops, 600), { km: 320, timeMins: 600 }, 'strictLine: arrival pins the exact end chainage');
+  assert.equal(trajectoryOver(segmentStops, 359), null, 'strictLine: t < dep renders no column marker');
+  assert.equal(trajectoryOver(segmentStops, 601), null, 'strictLine: t > arr renders no column marker');
+  assert.equal(trajectoryOver([{ timeMins: 360, km: 0 }], 500), null, 'strictLine: single stop has no lockable run');
 });
 
 test('tsdMath: robust stop parsing, X/Y converters, degenerate-section guards', () => {
@@ -219,7 +230,6 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
     showHeatmap: true,
     showBlocks: true,
     conflictsOnly: false,
-    cursorMin: 480,
   });
 
   assert.equal(stats.stations, 3);
@@ -248,7 +258,7 @@ test('drawTimeSpace: stations, sloped trajectories, conflict halo, blocks, live 
   assert.ok(stats.blockHits[0].w > 0 && stats.blockHits[0].h > 0, 'block hit box must be non-empty');
   assert.equal(stats.liveHits.length, 1, 'live marker hit position must be reported for hover');
   assert.equal(stats.liveHits[0].trainId, 'T1');
-  assert.equal(Math.round(stats.liveHits[0].x), Math.round(timeToX(480, 800)), 'live marker pins to the current-time column');
+  assert.equal(Math.round(stats.liveHits[0].x), Math.round(timeToX(480, 800)), 'live marker pins to its OWN schedule-time column');
 
   assert.equal(stats.zoneHits.length, 1, 'risk band must be reported for click inspection');
   assert.equal(stats.zoneHits[0].assetId, 'A1');

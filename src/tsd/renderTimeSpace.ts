@@ -28,8 +28,6 @@ export interface TimeSpaceRenderOptions {
   showBlocks: boolean;
   /** Draw only conflict halos, hiding trajectory strings. */
   conflictsOnly: boolean;
-  /** cursor position on the day axis, minutes since midnight. */
-  cursorMin: number;
 }
 
 /** A disruption / problem location: fixed chainage and active time window. */
@@ -476,13 +474,15 @@ export function drawTimeSpace(
   }
 
   // Live train markers: glowing amber dot pinned to each train's own sloped
-  // trajectory — X follows the interpolated schedule time (pos.mins), Y the
-  // matching chainage — never the wall-clock column. The id label rides in a
-  // small dark pill offset (+8, -4); markers near the bottom origin flip the
-  // pill ABOVE the marker so the label never covers the X-axis tick labels.
+  // trajectory — X from its schedule-time mins, Y the matching chainage — never
+  // the wall-clock column, never a shared vertical timestamp line. The id label
+  // rides in a small dark pill offset (+10, -12) for even-indexed trains and
+  // mirrored to the LEFT for odd-indexed ones, so passing trains' labels do not
+  // stack vertically over each other.
+  let liveIndex = 0;
   for (const [trainId, pos] of Object.entries(opts.live)) {
     if (pos.km < minKm || pos.km > maxKm) continue;
-    const mx = xOf(pos.mins ?? opts.cursorMin);
+    const mx = xOf(pos.mins);
     const my = yOf(pos.km);
     ctx.fillStyle = hexA(ACCENT_AMBER, 60 / 255);
     ctx.beginPath();
@@ -502,14 +502,20 @@ export function drawTimeSpace(
     const label = liveDir === 'DOWN' ? `${trainId} ▾` : liveDir === 'UP' ? `${trainId} ▴` : trainId;
     ctx.font = '9px monospace';
     const textW = ctx.measureText(label).width;
-    // Badge offset (+10, -12) from the marker centre so passing trains' labels
-    // never stack over each other or cover their own glowing dot.
+    const flip = liveIndex % 2 === 1;
+    // Badge alternately (+10, -12) or mirrored to the left so adjacent passing
+    // trains' labels never stack in the same spot; near-bottom markers flip
+    // fully above the X-axis gutter.
     ctx.fillStyle = 'rgba(25, 33, 48, 0.86)';
     ctx.beginPath();
-    ctx.roundRect(mx + 10, nearBottom ? my - 12 - 12 : my - 12, textW + 6, 12, 6);
+    ctx.roundRect(flip ? mx - 10 - textW - 6 : mx + 10, nearBottom ? my - 12 - 12 : my - 12, textW + 6, 12, 6);
     ctx.fill();
     ctx.fillStyle = '#FFFFFF';
-    ctx.fillText(label, mx + 13, nearBottom ? my - 16 : my - 4);
+    ctx.textAlign = flip ? 'right' : 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(label, flip ? mx - 13 : mx + 13, nearBottom ? my - 16 : my - 4);
+    ctx.textAlign = 'left';
+    liveIndex += 1;
     stats.live += 1;
     stats.liveHits.push({ trainId, x: mx, y: my });
   }

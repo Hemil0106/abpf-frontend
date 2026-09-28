@@ -264,6 +264,34 @@ export function trajectoryLive(
   return trajectoryPoint(stops, timeMins);
 }
 
+/**
+ * Strict straight-string trajectory lock (TimeSpaceChart contract): the live
+ * pointer rides the SINGLE line from the train's own departure
+ * (depMins, startKm) to its arrival (arrMins, endKm) —
+ * progress = (simMins − depMins) / (arrMins − depMins). Returns null before
+ * departure or after arrival so a train outside its run window never draws a
+ * stray marker. Fully independent per train: no shared time column, no
+ * wall-clock fallback, no intermediate-stop kinks.
+ */
+export function trajectoryOver(
+  stops: readonly StopPoint[],
+  timeMins: number,
+): TrajectoryPoint | null {
+  if (stops.length < 2) return null;
+  const depMins = stops[0].timeMins;
+  const arrMins = stops[stops.length - 1].timeMins;
+  const spanMins = arrMins - depMins;
+  if (spanMins <= 0) return null;
+  const progress = (timeMins - depMins) / spanMins;
+  if (progress < 0 || progress > 1) return null;
+  const startKm = stops[0].km;
+  const endKm = stops[stops.length - 1].km;
+  return {
+    km: startKm + progress * (endKm - startKm),
+    timeMins: depMins + progress * spanMins,
+  };
+}
+
 function stopsFromPayload(train: TrainDto): Array<{
   time?: string | number;
   km?: number;
